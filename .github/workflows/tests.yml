@@ -1,10 +1,9 @@
 name: tests
 
-# On main and on pull requests (not on every branch push as well, which would
-# run each change twice).
+# On pull requests only. A run started by a push is labelled, publicly, with
+# the name of the account that pushed; a pull request run is labelled with
+# whoever opened the pull request.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 # The tests only read the code: no write access to the repository.
