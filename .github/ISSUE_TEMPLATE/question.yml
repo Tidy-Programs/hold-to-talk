@@ -1,0 +1,31 @@
+name: Question or idea
+description: Ask how something works, or suggest an improvement.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please keep your private information out of this.** Everyone who can
+        see this project can read what you write here: do not paste text you
+        dictated, your history, your dictionary words, or folder paths with
+        your Windows account name.
+
+        A security problem? Do not put the details here. The file
+        `SECURITY.md` in this project says how to report it privately. If
+        that private way is not available to you, you may post a question
+        here that says only that you have a security problem, with no
+        details.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: Your question or idea
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version (if it matters)
+      description: Settings > About in the app.
+      placeholder: "0.9.0"

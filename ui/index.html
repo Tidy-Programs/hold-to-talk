@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{{APP_NAME}}</title>
+<link rel="icon" href="/icon.png">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<div class="shell" id="shell" hidden>
+  <aside class="side">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="brand-name" id="brand-name">{{APP_NAME}}</span>
+    </div>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <div class="side-foot">
+      <div class="mini" id="mini-status" role="status" aria-live="polite" aria-label="Dictation status"></div>
+      <button class="link quiet" id="about-link" type="button"></button>
+    </div>
+  </aside>
+  <main class="main" id="main" tabindex="-1"></main>
+</div>
+<div class="gate" id="gate" hidden>
+  <div class="gate-card" role="alert">
+    <span class="mark big" aria-hidden="true"><i></i><i></i><i></i></span>
+    <h1 id="gate-title">{{APP_NAME}}</h1>
+    <p id="gate-text"></p>
+    <div class="row gate-actions" id="gate-actions"></div>
+  </div>
+</div>
+<div class="gate terms-gate" id="terms" hidden>
+  <div class="terms-card" role="dialog" aria-modal="true" aria-labelledby="terms-title">
+    <h1 id="terms-title" tabindex="-1">Terms of Use</h1>
+    <p class="small muted" id="terms-version"></p>
+    <div class="terms-body" id="terms-body" role="region" tabindex="0" aria-label="The Terms of Use"></div>
+    <div class="row terms-actions" id="terms-actions"></div>
+  </div>
+</div>
+<div class="browser-note" id="browser-note" role="note" hidden>This window is running in your ordinary browser, because neither Microsoft Edge nor Google Chrome was found. That browser's own extensions and settings apply to it.</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<dialog id="dialog"></dialog>
+</body>
+</html>

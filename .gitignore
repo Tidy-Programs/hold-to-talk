@@ -1,0 +1,62 @@
+# Personal data: never commit any of this. The app keeps its data outside this
+# folder (%LOCALAPPDATA%\HoldToTalk\data), but older versions kept it here and
+# a stray copy must still never be published.
+
+# Settings, vocabulary, dictionary, snippets and learned words
+config.json
+config.json.*
+*.bad*
+.cfg-*.tmp
+# Everything that has been dictated (SQLite database and its journal files)
+history.sqlite3*
+*.sqlite3*
+*.sqlite
+*.db
+*.db-wal
+*.db-shm
+# Logs can contain dictated text
+dictate.log*
+*.log
+*.log.*
+logs/
+# Copies the app makes when it moves or backs up old data
+*.migrated*
+*.copying
+# Recordings
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.opus
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Python environments, caches and build output
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+*.zip
+htt-test-home-*/
+
+# Editors and the operating system
+.vscode/
+.idea/
+.claude/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,68 @@
+name: Bug report
+description: Something in Hold to talk does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem.
+
+        **Please keep your private information out of this report.** Everyone
+        who can see this project can read what you write here.
+        - Do not paste text you dictated, your history or your dictionary words.
+        - Logs and the setup window's "Copy details" contain folder paths with
+          your Windows account name. Read them first, and replace your name
+          with `you` (for example `C:\Users\you\...`).
+        - Screenshots can show the same things: check them before you attach
+          one.
+        - A security problem? Do not put the details here. The file
+          `SECURITY.md` in this project says how to report it privately.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings > About in the app, or the setup window's first page.
+      placeholder: "0.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows
+      options:
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - Installing (the setup window)
+        - Installing (the text installer)
+        - Dictating
+        - The app's window
+        - Uninstalling
+        - Somewhere else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to make it happen again, if you know them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Error message or log lines (optional)
+      description: Only after removing your name and anything you dictated.
+      render: text

@@ -1,0 +1,52 @@
+# The files install.bat copies into the install folder: an explicit list, never
+# "everything in this folder" (a source folder can hold personal data files).
+# One path per line, relative to this folder. tests/test_install.py fails if a
+# new .py module (or a file in ui/) is missing from this list, or a listed
+# file does not exist.
+
+# The program
+api.py
+app.py
+audio.py
+cleanup.py
+dictate.py
+keys.py
+learn.py
+mousehelper.py
+mousehook.py
+overlay.py
+pipeline.py
+settings.py
+sounds.py
+stt.py
+terms.py
+textrules.py
+tray.py
+uiwin.py
+
+# The app window (served by api.py)
+ui/index.html
+ui/app.css
+ui/app.js
+
+# Icon, dependencies, scripts (install-files.txt itself too, so an installed
+# copy can be repaired), documents
+app.ico
+requirements.txt
+requirements-cuda.txt
+requirements.lock.txt
+requirements-cuda.lock.txt
+install-files.txt
+install.bat
+install.ps1
+install-gui.ps1
+htt-common.ps1
+uninstall.bat
+uninstall.ps1
+start.bat
+README.md
+LICENSE
+TERMS.md
+THIRD-PARTY-NOTICES.md
+SECURITY.md
+CHANGELOG.md

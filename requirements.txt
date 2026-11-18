@@ -1,0 +1,21 @@
+# These are the version RANGES (what a developer edits). The installer installs
+# the exact, hash-checked versions in requirements.lock.txt, made from this file
+# by tools/make_locks.py (see the README: Refreshing the lock files).
+#
+# Core dependencies: what Hold to talk needs on any PC (processor or GPU).
+# The NVIDIA runtime for graphics-card speech recognition is separate:
+# requirements-cuda.txt (install.bat adds it only when an NVIDIA card is found).
+#
+# Tested with Python 3.12 (64-bit) on Windows 11 and these versions:
+#   faster-whisper 1.2.1, sounddevice 0.5.6, numpy 2.5.4, pystray 0.19.5,
+#   pillow 13.0.0.
+# Newer releases inside the ranges below are allowed on purpose (compatible
+# updates and security fixes); Python 3.10, 3.11 and 3.13 are accepted by the
+# installer but have not been tested.
+# Also needed, but not installable by pip: tkinter (comes with Python from
+# python.org; the installer checks for it).
+faster-whisper>=1.2,<2
+sounddevice>=0.5,<0.6
+numpy>=2.0,<3
+pystray>=0.19,<0.20
+pillow>=11,<14

@@ -1,0 +1,15 @@
+# Batch files must keep Windows (CRLF) line endings or cmd.exe can mis-read
+# labels and goto in them.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+# Everything else: normalised to LF in the repository.
+*.py    text eol=lf
+*.ps1   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.js    text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.yml   text eol=lf
+LICENSE text eol=lf
+*.ico   binary

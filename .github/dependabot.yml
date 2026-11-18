@@ -1,0 +1,26 @@
+# Dependabot opens a pull request, once a month, when a newer version of a
+# library or of a GitHub action is available. Nothing is merged by itself:
+# every update goes through the tests and a person, and it is fine to leave a
+# pull request open until there is time.
+#
+# This file does not cover alerts for known security problems. Those are a
+# repository setting: Settings > Advanced Security > Dependabot alerts (and
+# "Dependabot security updates"), which a maintainer switches on.
+#
+# Library updates: the installer installs from the lock files, so a pull
+# request that changes requirements.txt or requirements-cuda.txt is not
+# finished until the lock files have been regenerated with
+# tools/make_locks.py (see ARCHITECTURE.md, "Refreshing the lock files").
+# The tests fail while a lock file disagrees with its range file.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"

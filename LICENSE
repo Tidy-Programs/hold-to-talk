@@ -1,0 +1,145 @@
+Hold to talk Licence
+Version 1.0, 18 November 2026
+
+Copyright (c) 2026 Hold to talk contributors. All rights reserved.
+
+This licence says what you may and may not do with Hold to talk (the
+"Software": the program, its source code and its documents). The Software is
+licensed to you, not sold. It is free to use, but it is not open-source
+software. By installing, copying or using the Software you accept this
+licence. If you do not accept it, do not install or use the Software, and
+delete any copy you have.
+
+In this licence:
+
+- "You" means the person using the Software and, if you use it for an
+  organisation, that organisation.
+- "The copyright holders" means the people who own the rights in the
+  Software.
+- "The maintainer" means the person or people who lawfully control the
+  project's own page on GitHub: whoever runs the project. Only the
+  maintainer can give a permission under this licence, and
+  only in writing.
+- "The contributors" has the meaning given in section 2 of the Terms of Use
+  (the file TERMS.md).
+
+1. What you may do
+
+   Free of charge, and for as long as you keep to this licence, you may:
+
+   a. install and use the Software on computers that you own or control, or
+      that you have been given to use (for example by your employer), for
+      any lawful purpose, including at work, within what the Terms of Use
+      say about how the app should and should not be used;
+   b. read the source code, and change it for your own use on those
+      computers;
+   c. make the copies that installing, using and backing up the Software
+      need;
+   d. tell other people about the project and point them to its page, so
+      that they can get the Software there themselves;
+   e. let a backup service, or someone who looks after your computer, handle
+      your copy on your behalf, and include short excerpts, screenshots or
+      log lines when you report a problem to the project, as long as nobody
+      else gets a usable copy of the Software.
+
+   This licence is personal to you, non-exclusive and non-transferable. It
+   covers each copy that the maintainer gives you, or that you download from
+   the project's page while the maintainer offers it there, including later
+   versions that you get in the same way. The
+   maintainer may stop offering the Software at any time; copies that you
+   already hold stay licensed until this licence ends under section 8.
+
+2. What you may not do
+
+   Unless the maintainer has given you permission in writing, you may not:
+
+   a. give, send, publish, upload, mirror or otherwise make available the
+      Software or any part of it, changed or unchanged, to anyone else. This
+      does not stop you sending something to the project through its page
+      (see section 3), or doing what section 1e allows. Where the project's
+      page is public, GitHub's own terms let its users view the page and
+      make a copy of it on GitHub (a "fork"); this licence does not take
+      that away, and it applies to every such copy;
+   b. sell, rent, lease or sublicense the Software, or charge for it or for
+      access to it;
+   c. use the Software's source code, or a substantial part of it, in another
+      program or work that you give or make available to anyone else;
+   d. remove or change, in any copy, a copyright, licence or terms notice, or
+      the step in which the Terms of Use are accepted, other than in a copy
+      that only you use;
+   e. use the name "Hold to talk" or its icon in a way that suggests that
+      something else is this project, or is approved by it.
+
+3. What you send to the project
+
+   In short: you are welcome to send ideas and fixes, and the project may
+   then use them freely, including in versions that are sold.
+
+   If you send the project a suggestion, a bug report or a change to the
+   code, you keep whatever rights you have in it, and you give the copyright
+   holders a permanent, worldwide, free permission, which you cannot take
+   back, to use it, change it, include it in the Software and license it to
+   others under this licence or any other terms. That includes versions of
+   the Software that are sold, or that are released under different terms.
+   You confirm that you have the right to give that permission. As far as
+   the law allows, you agree not to rely on any right to be named as the
+   author of what you sent, or to object to changes to it. Nothing is owed
+   to you for it, and no reply or use is promised.
+
+4. Other people's software
+
+   The Software works together with software and models from other
+   publishers, which THIRD-PARTY-NOTICES.md lists. This licence does not
+   cover them. Each comes under its own licence, and nothing in this licence
+   limits what those licences let you do with them.
+
+5. The Terms of Use
+
+   The Terms of Use in the file TERMS.md apply as well. This licence governs
+   what you may do with copies of the Software and with its source code; the
+   Terms of Use govern everything else about using the app. The disclaimers
+   and limits in this licence and the ones in the Terms of Use apply
+   together, and each is in addition to the other.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITH ALL FAULTS. TO THE FULLEST EXTENT
+   THE LAW ALLOWS, THE COPYRIGHT HOLDERS AND THE CONTRIBUTORS GIVE NO
+   WARRANTIES OF ANY KIND ABOUT IT, WHETHER EXPRESS, IMPLIED OR STATUTORY,
+   INCLUDING ANY WARRANTY OF MERCHANTABILITY, OF FITNESS FOR A PARTICULAR
+   PURPOSE, OF TITLE AND OF NON-INFRINGEMENT.
+
+7. LIMIT OF LIABILITY
+
+   THE LIABILITY OF THE COPYRIGHT HOLDERS AND THE CONTRIBUTORS FOR ANY CLAIM
+   ARISING FROM THE SOFTWARE OR FROM USING IT, UNDER ANY LEGAL THEORY,
+   INCLUDING CONTRACT, NEGLIGENCE AND OTHER WRONGS, IS EXCLUDED AND LIMITED
+   AS SECTION 10 OF THE TERMS OF USE SAYS, AND NO FURTHER. THIS LICENCE DOES
+   NOT ADD TO THAT LIABILITY.
+
+   Nothing in sections 6 and 7 excludes or limits any liability that cannot
+   be excluded or limited under the law that applies, including liability
+   for death or personal injury caused by negligence, for fraud, and for
+   intentional misconduct or gross negligence.
+
+8. Ending
+
+   You can end this licence at any time by uninstalling the Software and
+   deleting your copies.
+
+   If you break section 2, the maintainer may tell you so in writing. If you
+   do not put the matter right within 14 days of being told, this licence
+   ends at the end of those 14 days. If you broke section 2a, 2b or 2c on
+   purpose, it ends at once, without notice. When it ends you must stop using the Software and delete
+   your copies.
+
+   Sections 2, 3, 5, 6, 7 and 9 continue to apply after this licence ends.
+
+9. Everything else
+
+   All rights that this licence does not expressly give you are reserved by
+   the copyright holders. This licence gives you no right to their names or
+   marks. Rights that the law gives you and that cannot be taken away by
+   agreement, for example under consumer law or the law on computer
+   programs, stay with you. If part of this licence cannot be enforced, the
+   rest stays in effect.
