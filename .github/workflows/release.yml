@@ -1,0 +1,66 @@
+name: release
+
+# Builds the Setup file from the code in this repository, on a GitHub
+# machine, and publishes it as a release. Started by hand only (Actions >
+# release > Run workflow). The release is then made by GitHub's automation,
+# not by a person's account.
+on:
+  workflow_dispatch:
+
+# Only this workflow may write: it creates the tag and the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: windows-2022
+    # Only the main branch can be released.
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    steps:
+      # Actions are pinned to an exact commit (the version is in the comment).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # Nothing is downloaded here: the build uses the Inno Setup compiler
+      # that the GitHub machine image already has, and fails if it is missing.
+      - name: Build the Setup file
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path -LiteralPath $iscc)) { throw "Inno Setup 6 was not found on this machine." }
+          python -B tools/build_setup.py --iscc $iscc
+          if ($LASTEXITCODE -ne 0) { throw "The build failed." }
+          Get-ChildItem dist | ForEach-Object { '{0}  {1}' -f $_.Name, $_.Length }
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Select-String -Path settings.py -Pattern '^APP_VERSION\s*=\s*"([0-9.]+)"').Matches[0].Groups[1].Value
+          if (-not $version) { throw "APP_VERSION was not found in settings.py." }
+          $tag = "v$version"
+          $exe = "dist/HoldToTalk-Setup-$version.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "$exe was not built." }
+          $notes = @(
+            "Download **HoldToTalk-Setup-$version.exe** below and double-click it.",
+            "",
+            "- The Setup file is not digitally signed, so Windows may show a ""Windows protected your PC"" screen first.",
+            "- It also updates an older version: it does not install a second copy, and your settings and history are kept.",
+            "- ``SHA256SUMS.txt`` holds the fingerprint of the Setup file, for checking your download.",
+            "- What changed is in ``CHANGELOG.md``; how to install, update and uninstall is in ``README.md``."
+          ) -join "`n"
+          Set-Content -LiteralPath notes.md -Value $notes -Encoding utf8
+          gh release create $tag $exe dist/SHA256SUMS.txt --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA --title "Hold to talk $version" --notes-file notes.md
+          if ($LASTEXITCODE -ne 0) { throw "The release could not be created (does $tag already exist?)." }
