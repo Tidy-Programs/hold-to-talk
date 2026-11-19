@@ -426,12 +426,65 @@ function Ensure-Environment($Python, $Layout, [string]$ProgramDir, [bool]$UseGpu
 
 # -- the rest of the install -----------------------------------------------------
 
+function Test-ManifestEntry([string]$Entry) {
+    # $null when a line of install-files.txt is a plain relative path inside the
+    # app folder; otherwise why not. Refused: a rooted path (leading slash or
+    # backslash), a drive letter or any colon, "..", a quote character, and braces
+    # (the Setup.exe build would read them as Inno constants). tools/build_setup.py
+    # applies the same rules.
+    if ($Entry -match '^[\\/]') { return 'it starts with a slash or backslash' }
+    if ($Entry -match '^[A-Za-z]:') { return 'it starts with a drive letter' }
+    if ($Entry.Contains(':')) { return 'it contains a colon' }
+    if ($Entry.Contains('..')) { return 'it contains ".."' }
+    if ($Entry.Contains('"') -or $Entry.Contains("'")) { return 'it contains a quote character' }
+    if ($Entry.Contains('{') -or $Entry.Contains('}')) { return 'it contains a brace' }
+    return $null
+}
+
 function Get-Manifest([string]$Dir) {
     $path = Join-Path $Dir 'install-files.txt'
     if (-not (Test-Path -LiteralPath $path)) { throw "install-files.txt is missing next to install.bat ($Dir). Extract the whole ZIP first." }
     Get-Content -LiteralPath $path | ForEach-Object {
         $l = $_.Trim()
-        if ($l -and -not $l.StartsWith('#')) { $l -replace '/', '\' }
+        if ($l -and -not $l.StartsWith('#')) {
+            $bad = Test-ManifestEntry $l
+            if ($bad) { throw "install-files.txt has an entry that is not allowed ($l): $bad." }
+            $l -replace '/', '\'
+        }
+    }
+}
+
+function Test-DownloadIntact([string]$Dir) {
+    # The Setup.exe carries a list of hashes, files.sha256, next to this script
+    # (one line "<64 lowercase hex>  <path with forward slashes>" per file of
+    # install-files.txt, after the line "# htt-sha256 1"). If it is there, every
+    # listed file must be present and match, and nothing else may be in it. A ZIP
+    # or a checkout has no such file: nothing is checked and nothing is printed.
+    $sumFile = Join-Path $Dir 'files.sha256'
+    if (-not (Test-Path -LiteralPath $sumFile)) { return }
+    $damaged = "This download is damaged or was changed. Download it again from the project's page."
+    $want = @{}
+    $format = $false
+    foreach ($raw in (Get-Content -LiteralPath $sumFile -Encoding ASCII)) {
+        $l = $raw.TrimEnd()
+        if (-not $l) { continue }
+        if ($l -eq '# htt-sha256 1') { $format = $true; continue }
+        $m = [regex]::Match($l, '^([0-9a-f]{64})  (\S.*)$')
+        if (-not $m.Success) { throw $damaged }
+        $key = $m.Groups[2].Value.ToLowerInvariant()
+        if ($want.ContainsKey($key)) { throw $damaged }
+        $want[$key] = $m.Groups[1].Value
+    }
+    if (-not $format) { throw $damaged }
+    $files = @(Get-Manifest $Dir)
+    if ($files.Count -ne $want.Count) { throw $damaged }
+    foreach ($rel in $files) {
+        $key = ($rel -replace '\\', '/').ToLowerInvariant()
+        if (-not $want.ContainsKey($key)) { throw $damaged }
+        $path = Join-Path $Dir $rel
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw $damaged }
+        $have = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($have -ne $want[$key]) { throw $damaged }
     }
 }
 
@@ -446,6 +499,10 @@ function Copy-WithRetry([string]$From, [string]$To) {
 }
 
 function Install-Files($Files, [string]$From, [string]$To) {
+    foreach ($f in $Files) {
+        $bad = Test-ManifestEntry ([string]$f)
+        if ($bad) { throw "A file name in the list is not allowed ($f): $bad." }
+    }
     $same = [IO.Path]::GetFullPath($From).TrimEnd('\') -ieq [IO.Path]::GetFullPath($To).TrimEnd('\')
     if ($same) { Say '  Already running from the install folder: nothing to copy.'; return }
     $missing = @($Files | Where-Object { -not (Test-Path -LiteralPath (Join-Path $From $_)) })
@@ -453,6 +510,8 @@ function Install-Files($Files, [string]$From, [string]$To) {
     New-Item -ItemType Directory -Force -Path $To | Out-Null
     foreach ($rel in $Files) {
         $dst = Join-Path $To $rel
+        $toFull = [IO.Path]::GetFullPath($To).TrimEnd('\') + '\'
+        if (-not [IO.Path]::GetFullPath($dst).StartsWith($toFull, [StringComparison]::OrdinalIgnoreCase)) { throw "A file name in the list points outside the install folder ($rel)." }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dst) | Out-Null
         Copy-WithRetry (Join-Path $From $rel) $dst
         try { Unblock-File -LiteralPath $dst -ErrorAction Stop } catch { }
@@ -808,6 +867,9 @@ try {
         Write-Marker ([ordered]@{ kind = 'error'; text = $msg })
         exit 3
     }
+
+    # A download from the Setup.exe is checked against its hash list first.
+    Test-DownloadIntact $SrcDir
 
     $layout = Get-HttLayout -InstallRoot $InstallRoot -EnvDir $EnvDir -StartMenuDir $StartMenuDir `
         -DesktopDir $DesktopDir -RegKey $RegKey -Strict:(-not $EnvOnly)

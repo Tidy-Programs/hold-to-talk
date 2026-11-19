@@ -40,7 +40,7 @@ not one. No fix and no time frame is promised.
 
 - The app's own code (the `.py` files and the window in `ui/`).
 - The installer and uninstaller (`install.bat`, `install-gui.ps1`,
-  `install.ps1`, `uninstall.bat`, `uninstall.ps1`, `htt-common.ps1`).
+  `install.ps1`, `uninstall.bat`, `uninstall.ps1`, `uninstall-gui.ps1`, `htt-common.ps1`).
 - The window and the local server that shows it, including the Terms of Use
   screen and the step of accepting the terms (`TERMS.md`, `terms.py`): for
   example a way to make the app dictate without the

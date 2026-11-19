@@ -172,6 +172,78 @@ class ScriptFiles(unittest.TestCase):
         self.assertLess(text.index('x:Name="DiskWarn"'),
                         text.index('x:Name="PlanPanel"'))
 
+    def test_install_python_for_me_is_pinned_and_checked(self):
+        text = GUI.read_text(encoding="ascii")
+        # one pinned file: the exact address, size and SHA-256
+        self.assertIn("Url     = 'https://www.python.org/ftp/python/3.12.10/"
+                      "python-3.12.10-amd64.exe'", text)
+        self.assertIn("Bytes   = [int64]26964224", text)
+        self.assertIn("Sha256  = '67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb'",
+                      text)
+        # per user, no administrator rights, python.exe not on PATH, no file associations,
+        # no shortcuts (names checked against docs.python.org/3.12/using/windows.html)
+        self.assertIn("'/quiet', 'InstallAllUsers=0', 'PrependPath=0', 'Include_launcher=1', "
+                      "'InstallLauncherAllUsers=0',\n                'Include_tcltk=1', "
+                      "'Include_test=0', 'SimpleInstall=1', 'AssociateFiles=0', 'Shortcuts=0')", text)
+        self.assertNotIn("your PATH setting is not changed", text)
+        for needle in ("Get-AuthenticodeSignature", "Python Software Foundation",
+                       "AllowAutoRedirect = $false", "[Net.SecurityProtocolType]::Tls12",
+                       "HttpCompletionOption]::ResponseHeadersRead",
+                       "CreateNew", "function Remove-PythonWorkDir",
+                       "Refused: nothing is downloaded in test mode.",
+                       "Refused: nothing is run in test mode.",
+                       "Install Python for me", "PSF License",
+                       "Nothing is downloaded until you choose the button."):
+            self.assertIn(needle, text)
+        # the only network code is the one pinned request; nothing is fetched at start
+        self.assertNotRegex(text, r"Invoke-WebRequest|Invoke-RestMethod|DownloadFile|"
+                                  r"DownloadString|WebClient|Start-BitsTransfer")
+        self.assertEqual(len(re.findall(r"SendAsync\(", text)), 1)
+        # verification needs both the hash and the signature, before anything is run
+        verify = text.index("'verify' {")
+        self.assertLess(verify, text.index("$p.Proc = & $script:PyRun"))
+        self.assertLess(text.index("function Test-PythonInstaller"), verify)
+        body = re.search(r"function Test-PythonInstaller.*?\n}\n", text, re.S).group(0)
+        for needle in ("Get-StreamSha256", "$Lock", "FileShare]::Read"):
+            self.assertIn(needle, body)
+        sig = re.search(r"function Test-PythonSignature.*?\n}\n", text, re.S).group(0)
+        for needle in ("'Valid'", "$Pin.Signer"):
+            self.assertIn(needle, sig)
+        # the file stays open (FileShare.Read) from before the check until the process has started
+        self.assertLess(text.index("$p.Lock = New-Object IO.FileStream"), verify)
+        run = text.index("$p.Proc = & $script:PyRun")
+        self.assertLess(run, text.index("try { $p.Lock.Dispose() }"))
+        # a folder that cannot be made private stops the run
+        self.assertIn("throw 'A private folder could not be made on this PC", text)
+        # 15 minutes, then "Stop waiting"; 3010 is a success
+        self.assertIn("$script:PyTimeoutSeconds = 900", text)
+        self.assertIn("$code -ne 0 -and $code -ne 3010", text)
+        self.assertIn('Content="Stop waiting"', text)
+
+    def test_the_setup_exe_route_never_offers_the_text_installer(self):
+        text = GUI.read_text(encoding="ascii")
+        self.assertIn("[switch]$FromSetupExe", text)
+        self.assertRegex(text, r"Set-Shown \$ui\.TextInstallerBtn \(-not \$FromSetupExe")
+        for fn in ("Open-TextInstaller", "Start-TextInstallerFallback"):
+            body = re.search(r"function %s.*?\n}\n" % fn, text, re.S).group(0)
+            self.assertIn("if ($FromSetupExe)", body, fn)
+        # the ZIP wording lives in one place and is skipped in that route
+        self.assertEqual(len(re.findall("Extract the whole ZIP",
+                                        text.split("function Invoke-SelfTest")[0])), 2)
+        adv = re.search(r"function Get-DownloadAdvice.*?\n}\n", text, re.S).group(0)
+        self.assertIn("if ($FromSetupExe)", adv)
+        self.assertIn("project's page", adv)
+        # documents are opened from a copy, which is deleted on exit
+        self.assertIn("function Remove-DocumentCopies", text)
+        self.assertGreaterEqual(text.count("Remove-DocumentCopies"), 4)
+        # the Setup.exe tells the window
+        iss = (ROOT / "installer" / "holdtotalk.iss").read_text(encoding="ascii")
+        self.assertIn("-File \"' + Gui + '\" -FromSetupExe", iss)
+
+    def test_the_fake_engine_switches_to_python_found_only_after_the_stub(self):
+        text = FAKE.read_text(encoding="ascii")
+        self.assertIn("HTT_FAKE_PYTHON_INSTALLED", text)
+
     def test_nothing_personal_in_the_files(self):
         user = os.environ.get("USERNAME", "\0").lower()
         for path in (GUI, FAKE, ROOT / "install.bat"):
@@ -184,6 +256,14 @@ class ScriptFiles(unittest.TestCase):
 class SelfTest(unittest.TestCase):
     def test_selftest_passes(self):
         code, out = run_ps([GUI, "-SelfTest"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("selftest ok", out)
+
+
+@unittest.skipUnless(HAVE_WPF, "needs Windows PowerShell with WPF")
+class SelfTestFromTheSetupExe(unittest.TestCase):
+    def test_selftest_passes_with_the_setup_exe_switch_too(self):
+        code, out = run_ps([GUI, "-SelfTest", "-FromSetupExe"])
         self.assertEqual(code, 0, out)
         self.assertIn("selftest ok", out)
 
@@ -318,6 +398,22 @@ class AutoRunWithTheFakeEngine(unittest.TestCase):
         # checked twice (Check again), never installed
         self.assertEqual([r["mode"] for r in runs], ["check", "check"])
 
+    def test_install_python_for_me_in_test_mode_calls_the_stub_and_downloads_nothing(self):
+        temp = Path(tempfile.gettempdir())
+        before = {p.name for p in temp.glob("htt-py-*")}
+        code, out, runs = self.auto("nopython", "install-python")
+        self.assertEqual(code, 0, out)
+        self.assertIn("pyinstall=1", out)               # the stub was called, once
+        self.assertIn("result=success", out)            # ...and Python was "found" after it
+        self.assertEqual([r["mode"] for r in runs], ["check", "check", "progress"])
+        self.assertEqual({p.name for p in temp.glob("htt-py-*")}, before,
+                         "a folder for the installer was made in test mode")
+        # without the button the stub is never called
+        self.record.unlink()
+        code, out, runs = self.auto("nopython", "install")
+        self.assertEqual(code, 3, out)
+        self.assertIn("pyinstall=0", out)
+
     def test_cancel_at_the_terms_exits_3_and_never_installs(self):
         code, out, runs = self.auto("ok", "cancel-terms")
         self.assertEqual(code, 3, out)
@@ -395,6 +491,33 @@ class AutoRunWithTheFakeEngine(unittest.TestCase):
                  "-StartMenuDir", short / "sm", "-DesktopDir", short / "dt",
                  "-RegKey", self.key]
         code, out, runs = self.auto("ok", "install", overrides=given)
+        self.assertEqual(code, 0, out)
+        self.assertIn("result=success", out)
+
+    def test_a_lone_carriage_return_does_not_forge_a_marker(self):
+        # the engine prints "progress<CR>@@htt {error}" and "...{done}" on stdout
+        code, out, runs = self.auto("cr-forge", "install")
+        self.assertEqual(code, 0, out)
+        self.assertIn("result=success", out)
+        self.assertNotIn("Error: CRFORGED", out)
+
+    def test_autorun_refuses_a_data_folder_from_the_environment_outside_the_temp_folder(self):
+        for name in ("HOLDTOTALK_HOME", "HTT_ENV_DIR"):
+            with self.subTest(variable=name):
+                self.record.unlink(missing_ok=True)
+                env = clean_env(HTT_FAKE_RECORD=str(self.record), **{name: r"C:\Users\you\data"})
+                code, out = run_ps([GUI, "-Engine", FAKE, "-AutoRun", "install",
+                                    *self.overrides], env=env)
+                self.assertEqual(code, 1, out)
+                self.assertIn("Refused", out)
+                self.assertIn(name, out)
+                self.assertFalse(self.record.exists(), "the engine was started")
+        env = clean_env(HTT_FAKE_RECORD=str(self.record), HOLDTOTALK_HOME=str(self.tmp / "data"))
+        code, out = run_ps([GUI, "-Engine", FAKE, "-AutoRun", "install", *self.overrides], env=env)
+        self.assertEqual(code, 0, out)
+
+    def test_from_the_setup_exe_the_window_runs_the_same_way(self):
+        code, out, runs = self.auto("ok", "install", extra=["-FromSetupExe"])
         self.assertEqual(code, 0, out)
         self.assertIn("result=success", out)
 

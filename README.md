@@ -14,13 +14,19 @@ the text is pasted. It also runs on your PC.
 
 ## Quick start
 
-1. You need Windows 11 (Windows 10 has not been tested) and 64-bit Python
-   3.12 (see "Step 0: get Python"; the installer tells you if it is missing).
-2. Download this project as a ZIP, unblock it and extract it.
-3. Double-click **`install.bat`**. A setup window shows the Terms of Use,
-   what will be installed and where, and the progress.
+1. You need Windows 11 (Windows 10 has not been tested).
+2. On this project's GitHub page, open **Releases** and download
+   **`HoldToTalk-Setup-0.9.0.exe`** (the number is the version).
+3. Double-click it. A setup window shows the Terms of Use, what will be
+   installed and where, and the progress. If Python is not on your PC yet,
+   the window offers to install it for you.
 4. Start **Hold to talk** from the Start menu, hold **Ctrl + Windows**, speak,
    and let go.
+
+The Setup file is not digitally signed, so Windows may show a blue "Windows
+protected your PC" screen first (see "Troubleshooting"). You can instead
+download the project as a ZIP and run `install.bat`, which opens the same
+setup window from files you can read first.
 
 The full walk-through is in "Installing, step by step". Read "Before you
 install" first: it has the Terms of Use and what the app connects to.
@@ -220,6 +226,10 @@ Known limitations). There is no account, no analytics and no update check.
 
 ## Step 0: get Python
 
+You only need this step if you want to install Python yourself. The setup
+window can do it for you (**Install Python for me**), whichever way you
+started it.
+
 Skip this step if you already have 64-bit Python 3.10 to 3.13. To check:
 
 1. Press the Windows key, type `cmd` and press Enter. A black window, the
@@ -235,8 +245,14 @@ Skip this step if you already have 64-bit Python 3.10 to 3.13. To check:
 
 You do not have to do these checks: the installer checks again. If it finds
 no suitable Python, the setup window says so on its "What will be installed"
-page, with an **Open python.org** button and a **Check again** button, so you
-can install Python and carry on without starting over.
+page. It offers **Install Python for me** (it downloads the official Python
+3.12.10 installer from python.org, about 27 MB, checks its checksum and its
+Python Software Foundation signature, and installs Python for your Windows
+account only, with no administrator rights; it does not add python.exe to
+your PATH, though Python's "py" launcher may add its own folder;
+nothing is downloaded until you click, and Python comes under its own licence,
+the PSF License), **Open python.org** and **Check again**, so you can get
+Python and carry on without starting over.
 
 To install Python:
 
@@ -249,6 +265,20 @@ To install Python:
 3. When it says the setup was successful, click Close.
 
 ## Installing, step by step
+
+There are two ways to get the same setup window:
+
+- **The Setup file (easiest).** On this project's GitHub page, open
+  **Releases**, download **`HoldToTalk-Setup-0.9.0.exe`** and double-click
+  it. No ZIP, no black window, and Step 0 is not needed: if Python is
+  missing, the window offers **Install Python for me**. The Setup file only
+  unpacks the same files to a temporary folder and opens the setup window;
+  it checks every file against a list of fingerprints first and stops if one
+  was damaged or changed. Then carry on at step 5 below. Next to it on the
+  Releases page is `SHA256SUMS.txt`, with the fingerprint of the Setup file
+  itself, for people who want to check their download.
+- **The ZIP and `install.bat`**, for people who want to read the scripts
+  before running anything. That is steps 1 to 4:
 
 1. **Download the program.** Go to this project's GitHub page, click the
    green **Code** button, then **Download ZIP**. (If you use
@@ -323,7 +353,8 @@ To install Python:
    and choose **Close** to start it.
 10. **If something goes wrong,** the last page says what happened instead.
     Nothing is half-broken: fix the problem (the message says what), then
-    choose **Try again**, which is the same as running `install.bat` again;
+    choose **Try again**, which is the same as running Setup (or
+    `install.bat`) again;
     it carries on where it stopped. **Copy details**
     puts the installer's text on the clipboard, for a bug report; read it
     before you paste it anywhere, because it contains folder paths with your
@@ -726,9 +757,10 @@ processor, a high-end NVIDIA graphics card), medians. They are not promises.
 
 ## Updating
 
-There is no update check. To get a newer version, download it the same way
-as in "Installing, step by step", extract it, and run its **`install.bat`**
-again. The same window then works as the updater and says so: it is called
+There is no update check. To get a newer version, download the new Setup
+file from the Releases page and double-click it (or download the new ZIP,
+extract it and run its **`install.bat`**). Either way the same window then
+works as the updater and says so: it is called
 **Update** instead of Setup, its first page says "This updates Hold to talk
 from version ... to ... It does not install a second copy", and its button
 and headings say **Update**, "Updating Hold to talk" and "Hold to talk is
@@ -743,13 +775,18 @@ changed.
 1. Open **Settings > Apps > Installed apps**, find **Hold to talk** and choose
    **Uninstall** (or double-click `uninstall.bat` in
    `%LOCALAPPDATA%\Programs\HoldToTalk`).
-2. A black window asks **"Remove Hold to talk now? [Y/n]"**. Press Enter. It
-   quits the app and removes the Start with Windows entry, both shortcuts, the
-   Installed apps entry, the Python environment, the window's browser
-   profile and the program files.
-3. It then asks **"Delete your settings, dictation history and logs too?
-   This cannot be undone. [y/N]"**. Press Enter to keep your data, or type
-   `y` to delete it. If you say yes it deletes only the files the app itself
+2. A window (in the same style as the setup window) asks **"Remove Hold to
+   talk?"** and lists what will be removed and what is kept. Choose
+   **Remove**. It quits the app and removes the Start with Windows entry, both
+   shortcuts, the Installed apps entry, the Python environment, the window's
+   browser profile and the program files.
+3. The box **"Also delete my settings, dictation history and logs (this cannot
+   be undone)"** starts unticked, so your data is kept. If you tick it, the
+   window asks **"Delete your settings and history for good?"** (Delete or
+   Keep). (Running `uninstall.bat -Yes` or `-Yes -DeleteData` in a Command
+   Prompt uses the text uninstaller, which asks the questions "Remove Hold to
+   talk now? [Y/n]" and "Delete your settings, dictation history and logs too?
+   This cannot be undone. [y/N]" instead.) If you choose Delete, it deletes only the files the app itself
    creates in the data folder, by name: `config.json` and its copies and
    leftovers (`config.json.bad`, `.bad-<time>`, `.copying`, `.migrated`),
    `history.sqlite3` with its side files and set-aside copies
@@ -757,8 +794,9 @@ changed.
    `terms-accepted.json` (the record of accepting the Terms of Use), and
    `logs\dictate.log` and `.1`. Anything else found there is left in place
    and listed.
-4. It prints what it left on purpose, and ends with "Hold to talk has been
-   removed."
+4. The window has three steps, listed on its left: Confirm, Removing and
+   Finish. The last page is headed **"Hold to talk has been removed"** and
+   says what was kept and what it left on purpose.
 
 **Remove every trace** (the uninstaller leaves things that are not part of
 the app, because other programs may use them):
@@ -771,7 +809,8 @@ the app, because other programs may use them):
   and the `HoldToTalk` value under
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and under
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`.
-- [ ] Answer **y** to delete your data, or delete the folder
+- [ ] Tick **Also delete my settings, dictation history and logs** in the
+  uninstall window (in the text uninstaller: answer **y**), or delete the folder
   `%LOCALAPPDATA%\HoldToTalk\data` yourself. If `%LOCALAPPDATA%\HoldToTalk`
   is then empty, the uninstaller removes it.
 - [ ] **Speech models:** open `%USERPROFILE%\.cache\huggingface\hub` (press
@@ -797,15 +836,21 @@ How to open a Command Prompt: press the Windows key, type `cmd`, press
 Enter. To open it in a folder: open the folder in File Explorer, click the
 address bar, type `cmd`, press Enter.
 
-- **The installer says no suitable Python was found.** Do Step 0, then choose
-  **Check again** in the setup window (or run `install.bat` again). The
-  message lists what it looked at.
+- **The installer says no suitable Python was found.** Choose **Install
+  Python for me** in the setup window. Or do Step 0 yourself, then choose
+  **Check again** (or run Setup or `install.bat` again). The message lists
+  what it looked at.
 - **The installer stopped part-way** (no internet, window closed): choose
-  **Try again** on the last page, or run `install.bat` again; it carries on.
-- **The setup window does not open.** `install.bat` then carries on as text
-  in the black window and says why in one line. You can also ask for the text
-  installer yourself: `install.bat -Console` (see "The text installer").
-- **Windows or antivirus blocks the installer.** Unblock the ZIP (Installing,
+  **Try again** on the last page, or run Setup (or `install.bat`) again; it
+  carries on.
+- **The setup window does not open.** If you used the Setup file, it shows a
+  message saying so; download the ZIP from the project's page instead and
+  run its `install.bat`. If you started from the ZIP, `install.bat` carries
+  on as text in the black window and says why in one line. You can also ask
+  for the text installer yourself: `install.bat -Console` (see "The text
+  installer").
+- **Windows or antivirus blocks the installer.** The Setup file and the
+  scripts are not digitally signed. For the ZIP, unblock it first (Installing,
   step 2). A SmartScreen "Windows protected your PC" screen has a "More info"
   link and a "Run anyway" button; use them only if you trust where you
   downloaded the files from. Some antivirus programs distrust any unsigned
@@ -821,7 +866,7 @@ address bar, type `cmd`, press Enter.
   the key: pasting waits until no modifier key is held.
 - **The icon stays amber for a very long time.** The speech model is probably
   still downloading (you skipped it at install, or it was missing). Quit the
-  app, run `install.bat` again and say yes to the download so you see
+  app, run Setup (or `install.bat`) again and leave the model download ticked so you see
   progress. If the window says the model failed to load, it offers a retry.
 - **The text comes out in the wrong language or garbled.** Choose your
   language in Settings > Microphone and language instead of detecting it.

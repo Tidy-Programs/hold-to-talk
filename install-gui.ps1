@@ -35,9 +35,10 @@ param(
     [string]$Engine,
     [switch]$SelfTest,
     [string]$Shots,
-    [ValidateSet('', 'install', 'install-none', 'cancel-terms', 'stop-install')][string]$AutoRun = '',
+    [ValidateSet('', 'install', 'install-none', 'cancel-terms', 'stop-install', 'install-python')][string]$AutoRun = '',
     [ValidateSet('', 'light', 'dark')][string]$Theme = '',
     [switch]$Launch,
+    [switch]$FromSetupExe,
     [string]$ReadySignal,
     [string]$ReasonFile,
     [string]$InstallRoot,
@@ -159,6 +160,18 @@ function Get-SandboxProblem([string[]]$Folders, [string]$Key) {
             return 'a test folder is not under the temp folder'
         }
     }
+    # The data folder (HOLDTOTALK_HOME) and the other places htt-common.ps1's
+    # Get-HttLayout reads from the environment must not lead out of the temp
+    # folder either: the data folder is where the uninstaller deletes the person's
+    # files, and the install window writes the record of the Terms of Use there.
+    foreach ($n in @('HOLDTOTALK_HOME', 'HTT_INSTALL_ROOT', 'HTT_ENV_DIR', 'HTT_START_MENU_DIR', 'HTT_DESKTOP_DIR')) {
+        $v = [Environment]::GetEnvironmentVariable($n)
+        if ([string]::IsNullOrWhiteSpace($v)) { continue }
+        try { $p = (Get-LongFullPath $v).TrimEnd('\') + '\' } catch { return "the environment variable $n could not be resolved" }
+        if ($p.Length -le $temp.Length -or -not $p.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase)) {
+            return "the environment variable $n points outside the temp folder"
+        }
+    }
     return $null
 }
 
@@ -185,9 +198,22 @@ function Write-StartupFailure([string]$Why) {
     }
 }
 
+function Get-DownloadAdvice([bool]$Again) {
+    # What to do when a file of the download is missing or wrong. The ZIP route
+    # says to extract it; the Setup.exe route has no folder to extract, so it
+    # points to the project's page.
+    if ($FromSetupExe) {
+        return "Download it again from the project's page, or download the ZIP there and run install.bat."
+    }
+    if ($Again) { return 'Extract the whole ZIP again (right-click the ZIP > Extract All).' }
+    return 'Extract the whole ZIP first (right-click the ZIP > Extract All), then run install.bat from the new folder.'
+}
+
 function Start-TextInstallerFallback([string]$Why) {
     # After the window was already up (rare): open the text installer in a
-    # visible console window, with one line that says why.
+    # visible console window, with one line that says why. Never from the
+    # Setup.exe: its files are in a folder that is deleted when it ends.
+    if ($FromSetupExe) { return }
     try {
         $bat = Join-Path $Here 'install.bat'
         # install.bat echoes it: no characters that cmd would act on.
@@ -803,32 +829,49 @@ $Xaml = @'
                   <TextBlock Style="{StaticResource Glyph}" Text="&#xE7BA;" Foreground="{DynamicResource Warn}" FontSize="18" Margin="0,0,10,0"/>
                   <TextBlock Style="{StaticResource H3}" Text="Python is needed first" Foreground="{DynamicResource Warn}" FontSize="16"/>
                 </StackPanel>
-                <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0"
-                           Text="Hold to talk needs 64-bit Python 3.12 (3.10 to 3.13 are also accepted), and no suitable copy was found on this PC. Install it once:"/>
-                <Grid Margin="0,12,0,0">
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
-                  <TextBlock Grid.Row="0" Text="1." FontWeight="SemiBold"/>
-                  <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,6"
-                             Text="Open python.org (the button below): it shows the Python downloads for Windows."/>
-                  <TextBlock Grid.Row="1" Text="2." FontWeight="SemiBold"/>
-                  <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,6"
-                             Text="Download the &quot;Windows installer (64-bit)&quot; for Python 3.12. On a PC with an ARM processor, still choose this 64-bit (x64) installer: it runs there. Do not use the Microsoft Store version."/>
-                  <TextBlock Grid.Row="2" Text="3." FontWeight="SemiBold"/>
-                  <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,6"
-                             Text="Run it. Leave &quot;tcl/tk and IDLE&quot; and &quot;py launcher&quot; ticked (they are by default)."/>
-                  <TextBlock Grid.Row="3" Text="4." FontWeight="SemiBold"/>
-                  <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}"
-                             Text="Come back here and choose Check again."/>
-                </Grid>
-                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                  <Button x:Name="PythonOrgBtn" Content="Open python.org" Style="{StaticResource Primary}" Margin="0,0,10,0"/>
-                  <Button x:Name="CheckAgainBtn" Content="Check again"/>
+                <TextBlock x:Name="PyLead" Style="{StaticResource Body}" Margin="0,10,0,0"
+                           Text="Python is a free program that Hold to talk needs. Choose the button and Setup downloads it from python.org and installs it for your Windows account only. Nothing is downloaded until you choose the button."/>
+                <WrapPanel Margin="0,14,0,0" Orientation="Horizontal">
+                  <Button x:Name="PyInstallBtn" Content="Install Python for me" Style="{StaticResource Primary}" Margin="0,0,8,6" Padding="14,0" MinWidth="0"/>
+                  <Button x:Name="PythonOrgBtn" Content="Open python.org" Margin="0,0,8,6" Padding="14,0" MinWidth="0"/>
+                  <Button x:Name="CheckAgainBtn" Content="Check again" Margin="0,0,0,6" Padding="14,0" MinWidth="0"/>
+                </WrapPanel>
+                <StackPanel x:Name="PyProgressPanel" Margin="0,10,0,0" Visibility="Collapsed">
+                  <DockPanel>
+                    <Button x:Name="PyStopBtn" DockPanel.Dock="Right" Content="Stop waiting" Margin="12,0,0,0" Visibility="Collapsed"/>
+                    <Button x:Name="PyCancelBtn" DockPanel.Dock="Right" Content="Cancel" Margin="12,0,0,0"/>
+                    <TextBlock x:Name="PyStatus" Style="{StaticResource Body}" VerticalAlignment="Center"/>
+                  </DockPanel>
+                  <ProgressBar x:Name="PyBar" Margin="0,10,0,0" AutomationProperties.Name="Python download progress"/>
                 </StackPanel>
+                <TextBlock x:Name="PyError" Style="{StaticResource Body}" Foreground="{DynamicResource Bad}" Margin="0,8,0,0" Visibility="Collapsed"/>
                 <TextBlock x:Name="PythonNote" Style="{StaticResource Muted}" Margin="0,8,0,0" Visibility="Collapsed"/>
-                <Expander x:Name="PythonDetails" Header="Details" Margin="0,14,0,0">
-                  <TextBox x:Name="PythonNotes" Style="{StaticResource LogBox}" MaxHeight="140"
-                           AutomationProperties.Name="What was looked at"/>
+                <!-- the technical facts and the manual route: collapsed, below the buttons -->
+                <Expander x:Name="PyManual" Header="Details" Margin="0,10,0,0">
+                  <StackPanel Margin="0,6,0,0">
+                    <TextBlock x:Name="PyWhat" Style="{StaticResource Body}"/>
+                    <TextBlock x:Name="PyLicence" Style="{StaticResource Muted}" Margin="0,6,0,0"/>
+                    <TextBlock Text="Install it yourself instead" FontWeight="SemiBold" Margin="0,14,0,6"/>
+                    <Grid>
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                      <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+                      <TextBlock Grid.Row="0" Text="1." FontWeight="SemiBold"/>
+                      <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,4"
+                                 Text="Choose Open python.org."/>
+                      <TextBlock Grid.Row="1" Text="2." FontWeight="SemiBold"/>
+                      <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,4"
+                                 Text="Download the &quot;Windows installer (64-bit)&quot; for Python 3.12 (not the Microsoft Store version)."/>
+                      <TextBlock Grid.Row="2" Text="3." FontWeight="SemiBold"/>
+                      <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" Margin="0,0,0,4"
+                                 Text="Run it and leave &quot;tcl/tk and IDLE&quot; and &quot;py launcher&quot; ticked (they are by default)."/>
+                      <TextBlock Grid.Row="3" Text="4." FontWeight="SemiBold"/>
+                      <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}"
+                                 Text="Come back here and choose Check again."/>
+                    </Grid>
+                    <TextBlock Text="What was looked at" FontWeight="SemiBold" Margin="0,14,0,6"/>
+                    <TextBox x:Name="PythonNotes" Style="{StaticResource LogBox}" MaxHeight="120"
+                             AutomationProperties.Name="What was looked at"/>
+                  </StackPanel>
                 </Expander>
               </StackPanel>
             </Border>
@@ -1254,12 +1297,15 @@ function Start-Engine([string[]]$EngineArgs, [string]$Kind) {
     $psi.StandardOutputEncoding = $utf8
     $psi.StandardErrorEncoding = $utf8
     $psi.WorkingDirectory = Split-Path -Parent $script:Engine
+    Add-LineReader
     $p = [Diagnostics.Process]::Start($psi)
     try { $p.StandardInput.Close() } catch { }      # the engine never reads input
+    $rd0 = New-Object HttLfReader($p.StandardOutput)
+    $rd1 = New-Object HttLfReader($p.StandardError)
     $script:Run = @{
         Proc = $p; Kind = $Kind; Exited = $null
-        Readers = @($p.StandardOutput, $p.StandardError)
-        Tasks = @($p.StandardOutput.ReadLineAsync(), $p.StandardError.ReadLineAsync())
+        Readers = @($rd0, $rd1)
+        Tasks = @($rd0.ReadLineAsync(), $rd1.ReadLineAsync())
         Done = @($false, $false)
     }
     $script:Timer.Start()
@@ -1277,7 +1323,7 @@ function Invoke-EngineTick {
                 try { $line = $r.Tasks[$i].Result } catch { $line = $null }
                 if ($null -eq $line) { $r.Done[$i] = $true; break }
                 # Reader 0 is standard output (markers count); 1 is standard error (log text only).
-                try { Receive-EngineLine $line $r.Kind ($i -eq 0) } catch { Add-Log $line }
+                Receive-RawLine $line $r.Kind (($i -eq 0) -and -not $r.Readers[$i].Untrusted)
                 $r.Tasks[$i] = $r.Readers[$i].ReadLineAsync()
             }
         }
@@ -1298,7 +1344,8 @@ function Invoke-EngineTick {
         }
     }
     Flush-Log
-    if (-not $script:Run -and -not $script:AutoTimerNeeded) { $script:Timer.Stop() }
+    if ($script:Py) { Step-PythonRun }
+    if (-not $script:Run -and -not $script:Py -and -not $script:AutoTimerNeeded) { $script:Timer.Stop() }
 }
 
 function Get-EngineDescendants([int]$RootId, $Since) {
@@ -1369,6 +1416,20 @@ function Test-RecordedAlive($Recorded) {
         if ($p.HasExited) { return $false }
         return ([Math]::Abs(($p.StartTime - $Recorded.Started).TotalSeconds) -lt 2)
     } catch { return $false }
+}
+
+function Receive-RawLine([string]$Line, [string]$Kind, [bool]$Trusted) {
+    # One line as the reader returned it (only a line feed ends a line). A line that
+    # holds a lone carriage return (a progress bar, or a program trying to forge a
+    # marker with "...\r@@htt {...}") is split there and its pieces are plain log
+    # text only: no marker is taken from it.
+    if ($Line.IndexOf([char]13) -ge 0) {
+        foreach ($piece in $Line.Split([char]13)) {
+            if ($piece -ne '') { try { Receive-EngineLine $piece $Kind $false } catch { Add-Log $piece } }
+        }
+    } else {
+        try { Receive-EngineLine $Line $Kind $Trusted } catch { Add-Log $Line }
+    }
 }
 
 function Receive-EngineLine([string]$Line, [string]$Kind, [bool]$Trusted = $true) {
@@ -1540,7 +1601,7 @@ function Update-Nav {
         }
         'choose' {
             $b.BackBtn.Visibility = 'Visible'
-            $b.BackBtn.IsEnabled = -not $script:Checking
+            $b.BackBtn.IsEnabled = -not $script:Checking -and -not $script:Py
             $b.NextBtn.Content = (Get-ModeWords).Verb
             $b.NextBtn.IsEnabled = Test-CanInstall
         }
@@ -1577,7 +1638,7 @@ function Show-ErrorPage([string]$Title, [string]$Text, [string]$Details) {
     $ui.ErrText.Text = $Text
     $ui.ErrDetails.Text = [string]$Details
     Set-Shown $ui.ErrDetailsPanel (-not [string]::IsNullOrWhiteSpace($Details))
-    Set-Shown $ui.TextInstallerBtn (-not (Test-TestMode) -and (Test-Path -LiteralPath (Join-Path $Here 'install.bat')))
+    Set-Shown $ui.TextInstallerBtn (-not $FromSetupExe -and -not (Test-TestMode) -and (Test-Path -LiteralPath (Join-Path $Here 'install.bat')))
     if ($null -eq $script:Outcome) { $script:Outcome = 1 }
     foreach ($k in $PageNames.Keys) { Set-Shown $ui[$PageNames[$k]] ($k -eq 'error') }
     $script:Page = 'error'
@@ -1595,6 +1656,7 @@ function Start-Check([bool]$Again) {
     Set-Shown $ui.CheckingRow (-not $Again)
     Set-Shown $ui.RecheckRow $Again
     $ui.CheckAgainBtn.IsEnabled = $false
+    $ui.PyInstallBtn.IsEnabled = $false
     Update-Nav
     try {
         [void](Start-Engine (@('-Check') + (Get-PassThroughArgs)) 'check')
@@ -1608,7 +1670,7 @@ function Complete-Check([int]$Code) {
     $script:Checking = $false
     Set-Shown $ui.CheckingRow $false
     Set-Shown $ui.RecheckRow $false
-    $ui.CheckAgainBtn.IsEnabled = $true
+    Update-PythonUi
     $facts = $script:PendingFacts
     if ($Code -ne 0 -or $null -eq $facts) {
         $details = ($script:CheckLog | Select-Object -Last 40) -join "`r`n"
@@ -1618,7 +1680,7 @@ function Complete-Check([int]$Code) {
             if ($m -and $m.kind -eq 'error' -and $m.text) { $why = ([string]$m.text -replace "`r?`n", "`r`n") + "`r`n`r`nNothing on this PC was changed." }
         }
         if (-not (Test-Path -LiteralPath $script:Engine)) {
-            $why = 'The file install.ps1 is missing next to the installer. Extract the whole ZIP first (right-click the ZIP > Extract All), then run install.bat from the new folder. Nothing on this PC was changed.'
+            $why = 'The file install.ps1 is missing next to the installer. ' + (Get-DownloadAdvice $false) + ' Nothing on this PC was changed.'
         }
         Show-ErrorPage 'The installer could not check this PC' $why $details
         return
@@ -1740,7 +1802,8 @@ function Set-Facts($Facts) {
     Set-Shown $ui.PythonPanel (-not $pyOk)
     Set-Shown $ui.PlanPanel $pyOk
     if (-not $pyOk) {
-        $notes = @('What was looked at:') + @($f.python.notes | ForEach-Object { [string]$_ })
+        Set-PythonTexts
+        $notes = @($f.python.notes | ForEach-Object { [string]$_ })
         $ui.PythonNotes.Text = ($notes -join "`r`n")
     }
     Update-Plan
@@ -1840,7 +1903,7 @@ function Read-Terms {
     $script:TermsOk = $false
     $script:TermsProblem = $null
     if (-not (Test-Path -LiteralPath $script:TermsPath)) {
-        $script:TermsProblem = 'The file TERMS.md is missing next to the installer, so the terms cannot be shown and nothing can be installed. Extract the whole ZIP first (right-click the ZIP > Extract All), then run install.bat from the new folder. Nothing on this PC was changed.'
+        $script:TermsProblem = 'The file TERMS.md is missing next to the installer, so the terms cannot be shown and nothing can be installed. ' + (Get-DownloadAdvice $false) + ' Nothing on this PC was changed.'
         return
     }
     try { $lines = [IO.File]::ReadAllLines($script:TermsPath, [Text.Encoding]::UTF8) }
@@ -1849,7 +1912,7 @@ function Read-Terms {
     if ($lines.Count) { $first = $lines[0].TrimStart([char]0xFEFF) }
     $m = [regex]::Match($first, '^Version (\S+) ')
     if (-not $want -or -not $m.Success -or $m.Groups[1].Value -ne $want) {
-        $script:TermsProblem = 'TERMS.md is not the version of the Terms of Use that belongs to this program, so nothing can be installed. Extract the whole ZIP again (right-click the ZIP > Extract All). Nothing on this PC was changed.'
+        $script:TermsProblem = 'TERMS.md is not the version of the Terms of Use that belongs to this program, so nothing can be installed. ' + (Get-DownloadAdvice $true) + ' Nothing on this PC was changed.'
         return
     }
     $ui.TermsView.Document = New-TermsDocument $lines
@@ -1952,6 +2015,28 @@ function Set-TermsBoxForTest([bool]$On) {
     $ui.AgreeBox.IsChecked = $On
 }
 
+$script:DocDir = $null
+
+function Get-DocumentPath([string]$Name) {
+    # The file to hand to Notepad. From the Setup.exe the window runs in a
+    # folder that Setup deletes when it ends, and Notepad must not hold it: a
+    # copy is opened instead, in a private folder of its own (htt-doc-<guid>
+    # in the temp folder) that Remove-DocumentCopies deletes on exit.
+    $path = Join-Path $Here $Name
+    if (-not $FromSetupExe) { return $path }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $path }
+    if (-not $script:DocDir) { $script:DocDir = New-PrivateTempDir 'htt-doc-' }
+    $copy = Join-Path $script:DocDir $Name
+    Copy-Item -LiteralPath $path -Destination $copy -Force
+    return $copy
+}
+
+function Remove-DocumentCopies {
+    $d = $script:DocDir
+    $script:DocDir = $null
+    if ($d) { Remove-PrivateTempDir $d 'htt-doc-' }
+}
+
 function Open-Document([string]$Name) {
     $path = Join-Path $Here $Name
     if (-not (Test-Path -LiteralPath $path)) {
@@ -1960,6 +2045,7 @@ function Open-Document([string]$Name) {
         $ui.LinkStatus.Text = "Test mode: Notepad is not opened ($Name)."
     } else {
         try {
+            $path = Get-DocumentPath $Name
             Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\notepad.exe') -ArgumentList ('"' + $path + '"')
             $ui.LinkStatus.Text = "$Name opened in Notepad."
         } catch { $ui.LinkStatus.Text = "Notepad could not be opened. The file is $path" }
@@ -2155,6 +2241,20 @@ function Receive-ProgressLine([string]$Line, [bool]$Trusted = $true) {
     }
 }
 
+function Get-RunAgainName {
+    # What a person runs to try again: Setup itself on the Setup.exe route (install.bat is
+    # not there: its folder is Setup's private temporary folder), install.bat otherwise.
+    if ($FromSetupExe) { return 'Setup' }
+    return 'install.bat'
+}
+
+function Add-SetupExeHint([string]$Text) {
+    # The engine (install.ps1) words its warnings and errors for the ZIP route ("run
+    # install.bat again"). On the Setup.exe route one line says what that means here.
+    if ($FromSetupExe -and $Text -match 'install\.bat') { return ($Text + "`n(If you used the Setup file: run Setup again.)") }
+    return $Text
+}
+
 function Complete-Install([int]$Code) {
     Hide-Confirm
     $ui.Bar.Tag = $null
@@ -2200,7 +2300,7 @@ function Show-Result([string]$Kind, [int]$Code) {
   </Grid>
 </Border>
 '@)
-            $card.Child.Children[1].Text = $w
+            $card.Child.Children[1].Text = (Add-SetupExeHint $w)
             [void]$ui.WarnList.Children.Add($card)
         }
         $ui.StartNow.IsChecked = -not (Test-TestMode)      # (shown in the button row by Update-Nav)
@@ -2210,20 +2310,21 @@ function Show-Result([string]$Kind, [int]$Code) {
         $script:Outcome = 2
         Set-Badge 0xE7BA 'Warn' 'WarnSoft'
         $ui.ResultTitle.Text = "$($w.NounCap) stopped"
-        $ui.ResultLead.Text = "You stopped the $($w.Noun). What was already done stays on this PC, and nothing is broken. Try again (the same as running install.bat again) carries on where it stopped."
+        $ui.ResultLead.Text = "You stopped the $($w.Noun). What was already done stays on this PC, and nothing is broken. Try again (the same as running $(Get-RunAgainName) again) carries on where it stopped."
         Set-Shown $ui.SuccessPanel $false
         Set-Shown $ui.FailPanel $false
     } else {
         $script:Outcome = 1
         Set-Badge 0xE783 'Bad' 'BadSoft'
         $ui.ResultTitle.Text = "Hold to talk could not be $($w.Past)"
-        $ui.ResultLead.Text = "Nothing is broken. Fix the problem described below, then choose Try again (the same as running install.bat again): the $($w.Tool) carries on where it stopped."
+        $ui.ResultLead.Text = "Nothing is broken. Fix the problem described below, then choose Try again (the same as running $(Get-RunAgainName) again): the $($w.Tool) carries on where it stopped."
         $msg = $script:ErrorText
         if (-not $msg) {
             $tail = @($script:FullLog | Where-Object { $_.Trim() } | Select-Object -Last 8)
             $msg = "The installer stopped unexpectedly (exit code $Code)."
             if ($tail.Count) { $msg += "`n`nThe last lines it printed:`n" + ($tail -join "`n") }
         }
+        $msg = Add-SetupExeHint $msg
         $ui.ErrorBox.Text = ($msg -replace "`r?`n", "`r`n")
         Set-Shown $ui.SuccessPanel $false
         Set-Shown $ui.FailPanel $true
@@ -2231,7 +2332,416 @@ function Show-Result([string]$Kind, [int]$Code) {
     Show-Page 'result'
 }
 
+# -- "Install Python for me" ---------------------------------------------------------------------
+# Downloads ONE pinned file (the official 64-bit Windows installer of Python
+# from python.org), checks it, runs it for this account only, and then the
+# normal "Check again" takes over. Nothing is downloaded before the button is
+# chosen. In test mode (the five overrides, or any harness) nothing is ever
+# downloaded or run: the button calls Invoke-PythonInstallStub. The real steps
+# can run in test mode only through $script:PyOpen / $script:PyRun, which only
+# the self-test sets (a local file and a fake program, never the network).
+#
+# Phases, advanced by the window's timer (the window never waits on the network):
+#   connect -> download -> verify -> installing -> done / failed
+# The installer file is in a folder made fresh for this run (htt-py-<guid> in
+# the temp folder, this account only) and the folder is deleted in every case.
+
+$script:PyPin = [pscustomobject]@{
+    Version = '3.12.10'
+    Url     = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+    HostName = 'www.python.org'
+    Bytes   = [int64]26964224
+    Sha256  = '67b5635e80ea51072b87941312d00ec8927c4db9ba18938f7ad2d27b328b95fb'
+    Signer  = 'Python Software Foundation'
+    # per user, no administrator rights, python.exe not put on PATH, no file associations and no
+    # shortcuts (option names: docs.python.org/3.12/using/windows.html, "Installing Without UI")
+    Args    = @('/quiet', 'InstallAllUsers=0', 'PrependPath=0', 'Include_launcher=1', 'InstallLauncherAllUsers=0',
+                'Include_tcltk=1', 'Include_test=0', 'SimpleInstall=1', 'AssociateFiles=0', 'Shortcuts=0')
+}
+$script:Py = $null                 # the run in progress (a hashtable), or $null
+$script:PyOpen = $null             # tests only: scriptblock returning @{ Stream; Length } (no network)
+$script:PyRun = $null              # tests only: scriptblock (path, args) returning a process-like object
+$script:PyGetSignature = $null     # tests only: scriptblock (path) returning @{ Status; Subject }
+$script:PyInstallCalls = New-Object Collections.Generic.List[string]
+$script:PyLastError = $null
+$script:PyTimeoutSeconds = 900     # after this long "Stop waiting" is offered
+
+function Get-FileSha256([string]$Path) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $fs = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try { $b = $sha.ComputeHash($fs) } finally { $fs.Dispose(); $sha.Dispose() }
+    return (($b | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function Get-StreamSha256([IO.Stream]$Stream) {
+    # The hash of the whole stream, read from its start (the file stays open).
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { [void]$Stream.Seek(0, [IO.SeekOrigin]::Begin); $b = $sha.ComputeHash($Stream) } finally { $sha.Dispose() }
+    return (($b | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
+function Get-InstallerSignature([string]$Path) {
+    $s = Get-AuthenticodeSignature -LiteralPath $Path
+    $subject = ''
+    if ($s.SignerCertificate) { $subject = [string]$s.SignerCertificate.Subject }
+    return @{ Status = [string]$s.Status; Subject = $subject }
+}
+
+function Test-PythonInstaller([string]$Path, $Pin, [IO.FileStream]$Lock = $null) {
+    # $null when the file is the pinned one AND carries a valid signature of the
+    # Python Software Foundation; otherwise the plain reason. Both are needed.
+    # $Lock is the file opened for reading with FileShare.Read (nobody can write
+    # to it, replace it or rename it while it is open): the size and the hash
+    # are taken from that open handle, so what is checked is what is run. Without
+    # one (the self-test only) the file is opened here for the length of the check.
+    $own = $null
+    if (-not $Lock) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return 'The downloaded file is missing.' }
+        try { $own = New-Object IO.FileStream($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read) }
+        catch { return 'The downloaded file could not be opened, so it was not used.' }
+        $Lock = $own
+    }
+    try {
+        if ($Lock.Length -ne $Pin.Bytes) {
+            return 'The downloaded file is not the expected size, so it was not used.'
+        }
+        $got = Get-StreamSha256 $Lock
+        return (Test-PythonSignature $Path $Pin $got)
+    } finally { if ($own) { $own.Dispose() } }
+}
+
+function Test-PythonSignature([string]$Path, $Pin, [string]$got) {
+    if ($got -ne ([string]$Pin.Sha256).ToLowerInvariant()) {
+        return 'The downloaded file is not the one that was expected (its checksum does not match), so it was not used.'
+    }
+    try {
+        if ($script:PyGetSignature) { $sig = & $script:PyGetSignature $Path } else { $sig = Get-InstallerSignature $Path }
+    } catch { return 'The signature of the downloaded file could not be checked, so it was not used.' }
+    if ($sig.Status -ne 'Valid') {
+        return "The downloaded file has no valid signature (Windows says: $($sig.Status)), so it was not used."
+    }
+    if (([string]$sig.Subject).IndexOf([string]$Pin.Signer, [StringComparison]::Ordinal) -lt 0) {
+        return "The downloaded file is not signed by the $($Pin.Signer), so it was not used."
+    }
+    return $null
+}
+
+function New-PrivateTempDir([string]$Prefix) {
+    # A folder made new in the temp folder (<prefix><32 hex>), readable by this
+    # account only. If it cannot be made private it is removed again and this
+    # throws: nothing is put in a folder others might read or change.
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ($Prefix + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null     # fails if it exists
+    try {
+        $acl = New-Object Security.AccessControl.DirectorySecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $me = [Security.Principal.WindowsIdentity]::GetCurrent().User
+        $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+            $me, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+        if ($script:Harness -eq 'selftest' -and $script:FailAcl) { throw 'test: the ACL could not be set' }
+        Set-Acl -LiteralPath $dir -AclObject $acl
+    } catch {
+        try { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction Stop } catch { }
+        throw 'A private folder could not be made on this PC (its access rights could not be set), so nothing was done.'
+    }
+    return $dir
+}
+
+function Remove-PrivateTempDir([string]$Dir, [string]$Prefix) {
+    # Only a folder this window made: <prefix><32 hex> directly in the temp folder.
+    # Best effort: a file still held open by a program is left for Windows' own clean-up.
+    if (-not $Dir) { return }
+    $leaf = Split-Path -Leaf $Dir
+    $parent = (Split-Path -Parent $Dir).TrimEnd('\')
+    if ($leaf -notmatch ('^' + [regex]::Escape($Prefix) + '[0-9a-f]{32}$') -or $parent -ine ([IO.Path]::GetTempPath().TrimEnd('\'))) { return }
+    for ($i = 1; $i -le 5; $i++) {
+        if (-not (Test-Path -LiteralPath $Dir)) { return }
+        try { Remove-Item -LiteralPath $Dir -Recurse -Force -ErrorAction Stop } catch { Start-Sleep -Milliseconds (200 * $i) }
+    }
+}
+
+function New-PythonWorkDir { return (New-PrivateTempDir 'htt-py-') }
+
+function Remove-PythonWorkDir([string]$Dir) { Remove-PrivateTempDir $Dir 'htt-py-' }
+
+function Format-PythonSize {
+    return (Format-Bytes ([double]$script:PyPin.Bytes))
+}
+
+function Set-PythonTexts {
+    $pin = $script:PyPin
+    $ui.PyLead.Text = "Python is a free program that Hold to talk needs. Choose the button and Setup downloads it from python.org (about $(Format-PythonSize)) and installs it for your Windows account only. Nothing is downloaded until you choose the button."
+    $ui.PyWhat.Text = "The installer is the official Python $($pin.Version) installer (64-bit, about $(Format-PythonSize)) from python.org. It is checked against a fixed fingerprint and the Python Software Foundation's signature before it runs; if either check fails, nothing is run. Python $($pin.Version) is installed for this Windows account only, with the `"py`" launcher. It needs no administrator rights, does not add python.exe to your PATH, and sets up no file associations and no Start menu shortcuts; the `"py`" launcher may add its own folder to your PATH. On a PC with an ARM processor, still choose the 64-bit (x64) installer: it runs there."
+    $ui.PyLicence.Text = 'Python is not part of Hold to talk. It comes under its own licence, the PSF License (python.org/psf/license).'
+}
+
+function Update-PythonUi {
+    $p = $script:Py
+    $busy = ($null -ne $p)
+    $ui.PyInstallBtn.IsEnabled = -not $busy -and -not $script:Checking
+    $ui.PythonOrgBtn.IsEnabled = -not $busy
+    $ui.CheckAgainBtn.IsEnabled = -not $busy -and -not $script:Checking
+    Set-Shown $ui.PyProgressPanel $busy
+    Set-Shown $ui.PyCancelBtn ($busy -and ($p.Phase -eq 'connect' -or $p.Phase -eq 'download'))
+    Set-Shown $ui.PyStopBtn ($busy -and $p.Phase -eq 'installing' -and [bool]$p.OfferStop)
+    if ($script:PyLastError) { $ui.PyError.Text = $script:PyLastError; Set-Shown $ui.PyError $true } else { Set-Shown $ui.PyError $false }
+    if ($script:Page -eq 'choose') { Update-Nav }
+}
+
+function Set-PythonStatus([string]$Text, $Fraction) {
+    $ui.PyStatus.Text = $Text
+    if ($null -eq $Fraction) { $ui.PyBar.Tag = 'busy'; $ui.PyBar.Value = 0 }
+    else { $ui.PyBar.Tag = $null; $ui.PyBar.Value = [double]$Fraction }
+}
+
+function Invoke-PythonInstallStub {
+    # Test mode: nothing is downloaded or run. The call is recorded for the
+    # tests, and the fake engine then reports that Python was found.
+    $script:PyInstallCalls.Add('install-python')
+    [Environment]::SetEnvironmentVariable('HTT_FAKE_PYTHON_INSTALLED', '1', 'Process')
+    $script:PyLastError = $null
+    $ui.PythonNote.Text = 'Test mode: nothing is downloaded or installed.'
+    Set-Shown $ui.PythonNote $true
+    Update-PythonUi
+    Start-Check $true
+}
+
+function Start-PythonInstall {
+    # The button. Test mode goes to the stub; the real run needs a person.
+    if ($script:Py -or $script:Run -or $script:Checking) { return }
+    $script:PyLastError = $null
+    Set-Shown $ui.PythonNote $false
+    if ((Test-TestMode) -and -not $script:PyOpen) { Invoke-PythonInstallStub; return }
+    Start-PythonDownload
+}
+
+function Start-PythonDownload {
+    if ((Test-TestMode) -and -not $script:PyOpen) { throw 'Refused: nothing is downloaded in test mode.' }
+    $pin = $script:PyPin
+    $p = @{ Phase = 'connect'; Dir = $null; File = $null; Out = $null; Stream = $null; Got = [int64]0
+            ReadTask = $null; Buf = (New-Object byte[] 65536); Cancel = $false; Started = Get-Date; LastData = Get-Date
+            Http = $null; Task = $null; Proc = $null; Lock = $null; InstallStarted = $null; OfferStop = $false }
+    $script:Py = $p
+    try {
+        if (-not $script:PyOpen) {
+            $uri = [Uri]$pin.Url
+            if ($uri.Scheme -ne 'https' -or $uri.Host -ne $pin.HostName) { throw 'The download address is not python.org over HTTPS.' }
+            $proto = [Net.SecurityProtocolType]::Tls12
+            try { $proto = $proto -bor [Net.SecurityProtocolType]'Tls13' } catch { }
+            [Net.ServicePointManager]::SecurityProtocol = $proto
+        }
+        $p.Dir = New-PythonWorkDir
+        $p.File = Join-Path $p.Dir ('python-' + $pin.Version + '-amd64.exe')
+        if (-not $script:PyOpen) {
+            Add-Type -AssemblyName System.Net.Http
+            $h = New-Object Net.Http.HttpClientHandler
+            $h.AllowAutoRedirect = $false                # a redirect is refused, not followed
+            $c = New-Object Net.Http.HttpClient($h)
+            $c.Timeout = [TimeSpan]::FromMinutes(30)
+            $req = New-Object Net.Http.HttpRequestMessage([Net.Http.HttpMethod]::Get, $pin.Url)
+            $p.Http = $c
+            $p.Task = $c.SendAsync($req, [Net.Http.HttpCompletionOption]::ResponseHeadersRead)
+        }
+        Set-PythonStatus 'Connecting to python.org...' $null
+        Update-PythonUi
+        $script:Timer.Start()
+    } catch {
+        Stop-PythonRun ('Python could not be downloaded: ' + $_.Exception.Message)
+    }
+}
+
+function Stop-PythonRun([string]$Problem) {
+    # Ends the run (any phase but a running installer): streams closed, the
+    # folder with the installer or its partial file deleted, the message shown.
+    $p = $script:Py
+    if ($p) {
+        $p.ReadTask = $null
+        try { if ($p.Lock) { $p.Lock.Dispose() } } catch { }
+        try { if ($p.Out) { $p.Out.Dispose() } } catch { }
+        try { if ($p.Stream) { $p.Stream.Dispose() } } catch { }
+        try { if ($p.Http) { $p.Http.Dispose() } } catch { }
+        Remove-PythonWorkDir $p.Dir
+    }
+    $script:Py = $null
+    $script:PyLastError = $Problem
+    $ui.PyBar.Tag = $null
+    Update-PythonUi
+}
+
+function Stop-PythonDownload {
+    # The Cancel button: only while connecting or downloading.
+    $p = $script:Py
+    if (-not $p -or ($p.Phase -ne 'connect' -and $p.Phase -ne 'download')) { return $false }
+    $p.Cancel = $true
+    Stop-PythonRun $null
+    $ui.PythonNote.Text = 'The download was cancelled. Nothing was installed.'
+    Set-Shown $ui.PythonNote $true
+    return $true
+}
+
+function Stop-PythonInstallWait {
+    # "Stop waiting": ends only the installer process this window started (the
+    # Process object it holds, never one found by name), cleans up and shows the
+    # manual route. Only after the timeout, or when the person closes the window.
+    $p = $script:Py
+    if (-not $p -or $p.Phase -ne 'installing') { return $false }
+    try { if ($p.Proc -and -not $p.Proc.HasExited) { $p.Proc.Kill(); [void]$p.Proc.WaitForExit(5000) } } catch { }
+    Stop-PythonRun 'Stopped waiting for the Python installer. It may have left Python half installed. You can try again, or install Python yourself (see below).'
+    $ui.PyManual.IsExpanded = $true
+    return $true
+}
+
+function Show-PythonStopConfirm {
+    # The same question from the "Stop waiting" button and from closing the window.
+    if (-not $script:Py -or $script:Py.Phase -ne 'installing') { return }
+    if ($ui.Overlay.Visibility -eq 'Visible') { return }
+    $script:ConfirmKind = 'python'
+    $script:SavedConfirm = @($ui.StopTitle.Text, $ui.StopBody.Text, $ui.StopBtn.Content, $ui.KeepBtn.Content)
+    $ui.StopTitle.Text = 'Stop waiting for Python?'
+    $ui.StopBody.Text = 'Hold to talk will end the Python installer it started and stop waiting. Python may be left half installed. You can try again, or install Python yourself.'
+    $ui.StopBtn.Content = 'Stop waiting'
+    $ui.KeepBtn.Content = 'Keep waiting'
+    Show-Confirm
+}
+
+function Step-PythonRun {
+    $p = $script:Py
+    if (-not $p) { return }
+    try {
+        switch ($p.Phase) {
+            'connect' {
+                if (((Get-Date) - $p.Started).TotalSeconds -gt 45) { throw 'python.org did not answer in time.' }
+                $src = $null
+                if ($script:PyOpen) { $src = & $script:PyOpen $script:PyPin.Url }
+                else {
+                    $t = $p.Task
+                    if (-not $t.IsCompleted) { return }
+                    if ($t.IsFaulted -or $t.IsCanceled) { throw 'The connection to python.org failed. Check your internet connection.' }
+                    $r = $t.Result
+                    if ([int]$r.StatusCode -ne 200) { throw "python.org answered with code $([int]$r.StatusCode)." }
+                    $len = $r.Content.Headers.ContentLength
+                    $src = @{ Stream = $r.Content.ReadAsStreamAsync().Result; Length = [int64]$len }
+                }
+                if ($src.Length -ne $script:PyPin.Bytes) { throw 'The file on the server is not the expected size.' }
+                $p.Stream = $src.Stream
+                $p.Out = New-Object IO.FileStream($p.File, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+                $p.Phase = 'download'; $p.LastData = Get-Date
+                Update-PythonUi
+            }
+            'download' {
+                for ($i = 0; $i -lt 8; $i++) {
+                    if (-not $p.ReadTask) { $p.ReadTask = $p.Stream.ReadAsync($p.Buf, 0, $p.Buf.Length) }
+                    if (-not $p.ReadTask.IsCompleted) {
+                        if (((Get-Date) - $p.LastData).TotalSeconds -gt 60) { throw 'The download stopped (nothing arrived for a minute).' }
+                        break
+                    }
+                    if ($p.ReadTask.IsFaulted -or $p.ReadTask.IsCanceled) { throw 'The download was interrupted.' }
+                    $n = $p.ReadTask.Result
+                    $p.ReadTask = $null
+                    $p.LastData = Get-Date
+                    if ($n -le 0) { $p.Phase = 'verify'; break }
+                    $p.Out.Write($p.Buf, 0, $n)
+                    $p.Got += $n
+                    if ($p.Got -gt $script:PyPin.Bytes) { throw 'More data arrived than expected, so the download was stopped.' }
+                }
+                if ($p.Phase -eq 'download') {
+                    $frac = [double]$p.Got / [double]$script:PyPin.Bytes
+                    Set-PythonStatus ("Downloading Python... {0} of {1}" -f (Format-Bytes $p.Got), (Format-PythonSize)) $frac
+                } else {
+                    $p.Out.Dispose(); $p.Out = $null
+                    $p.Stream.Dispose(); $p.Stream = $null
+                    # Held open (read, nobody may write) from here until the installer has started,
+                    # so the file cannot be replaced or renamed between the check and the run.
+                    $p.Lock = New-Object IO.FileStream($p.File, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                    Set-PythonStatus 'Checking the downloaded file...' $null
+                    Update-PythonUi
+                }
+            }
+            'verify' {
+                # (one tick after the status was drawn: hashing and the signature check take a moment)
+                if (-not $p.Lock) { $p.Lock = New-Object IO.FileStream($p.File, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read) }
+                $problem = Test-PythonInstaller $p.File $script:PyPin $p.Lock
+                if ($problem) { throw $problem }
+                Set-PythonStatus 'Installing Python for this Windows account (this takes a minute or two)...' $null
+                $argsLine = (@($script:PyPin.Args) -join ' ')
+                try {
+                    if ($script:PyRun) { $p.Proc = & $script:PyRun $p.File $argsLine $p.Lock }
+                    else {
+                        if (Test-TestMode) { throw 'Refused: nothing is run in test mode.' }
+                        $psi = New-Object Diagnostics.ProcessStartInfo
+                        $psi.FileName = $p.File
+                        $psi.Arguments = $argsLine
+                        $psi.UseShellExecute = $false
+                        $psi.CreateNoWindow = $true
+                        $psi.WorkingDirectory = $p.Dir
+                        $p.Proc = [Diagnostics.Process]::Start($psi)
+                    }
+                } finally {
+                    # only now, with the process started, may the file be released
+                    try { $p.Lock.Dispose() } catch { }
+                    $p.Lock = $null
+                }
+                $p.Phase = 'installing'
+                $p.InstallStarted = Get-Date
+                Update-PythonUi
+            }
+            'installing' {
+                if (-not $p.Proc.HasExited) {
+                    if (-not $p.OfferStop -and ((Get-Date) - $p.InstallStarted).TotalSeconds -ge $script:PyTimeoutSeconds) {
+                        $p.OfferStop = $true
+                        Set-PythonStatus 'The Python installer is taking a long time (more than 15 minutes). You can keep waiting, or stop waiting.' $null
+                        Update-PythonUi
+                    }
+                    return
+                }
+                $code = [int]$p.Proc.ExitCode
+                # 3010 is Windows Installer's "done, a restart may be needed later": a success
+                if ($code -ne 0 -and $code -ne 3010) { throw "The Python installer stopped with code $code. Nothing in Hold to talk was changed. You can try again, or install Python yourself." }
+                $p.RestartHint = ($code -eq 3010)
+                Complete-PythonInstall
+            }
+        }
+    } catch {
+        Stop-PythonRun $_.Exception.Message
+    }
+}
+
+function Complete-PythonInstall {
+    $p = $script:Py
+    Remove-PythonWorkDir $p.Dir
+    $script:Py = $null
+    $script:PyLastError = $null
+    Update-ProcessAfterPython
+    $ui.PyBar.Tag = $null
+    if ($p.RestartHint) { $ui.PythonNote.Text = 'Python was installed. Windows may want a restart later; you do not need one now. Checking this PC again...' }
+    else { $ui.PythonNote.Text = 'Python was installed. Checking this PC again...' }
+    Set-Shown $ui.PythonNote $true
+    Update-PythonUi
+    Start-Check $true
+}
+
+function Update-ProcessAfterPython {
+    # The installer changed the user's PATH (the py launcher), but this window
+    # and the engine it starts keep the PATH they were started with: read it
+    # again, and name the new python.exe, so "Check again" can find it.
+    if ($script:Harness) { return }
+    try {
+        $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+        $u = [Environment]::GetEnvironmentVariable('Path', 'User')
+        [Environment]::SetEnvironmentVariable('Path', (($m, $u | Where-Object { $_ }) -join ';'), 'Process')
+    } catch { }
+    try {
+        $exe = Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'
+        if (Test-Path -LiteralPath $exe -PathType Leaf) { [Environment]::SetEnvironmentVariable('HTT_PYTHON', $exe, 'Process') }
+    } catch { }
+}
+
 # -- the confirmation and closing ---------------------------------------------------------------------
+
+$script:FailAcl = $false
+$script:ConfirmKind = $null
+$script:SavedConfirm = $null
+$script:ClosePending = $false
 
 function Show-Confirm {
     if ($ui.Overlay.Visibility -eq 'Visible') { return }
@@ -2245,9 +2755,22 @@ function Show-Confirm {
 function Hide-Confirm {
     $ui.Overlay.Visibility = 'Collapsed'
     $ui.Main.IsEnabled = $true
+    if ($script:ConfirmKind -eq 'python' -and $script:SavedConfirm) {
+        $ui.StopTitle.Text = $script:SavedConfirm[0]; $ui.StopBody.Text = $script:SavedConfirm[1]
+        $ui.StopBtn.Content = $script:SavedConfirm[2]; $ui.KeepBtn.Content = $script:SavedConfirm[3]
+    }
+    $script:ConfirmKind = $null
+    $script:ClosePending = $false
 }
 
 function Confirm-Stop {
+    if ($script:ConfirmKind -eq 'python') {
+        $closing = $script:ClosePending
+        Hide-Confirm
+        [void](Stop-PythonInstallWait)
+        if ($closing) { Close-Window (Get-CancelCode) }
+        return
+    }
     Hide-Confirm
     if (-not $script:Run -or $script:Run.Kind -ne 'progress') { return }
     $script:StopRequested = $true
@@ -2265,6 +2788,8 @@ function Close-Window([int]$Code) {
     $script:ExitCode = $Code
     if ($script:Harness -eq 'selftest') { $script:ClosedWith = $Code; return }
     if ($script:Run) { Stop-EngineTree; $script:Run = $null }
+    if ($script:Py) { [void](Stop-PythonDownload) }
+    if ($script:Py -and $script:Py.Phase -eq 'installing') { [void](Stop-PythonInstallWait) }
     $script:AllowClose = $true
     $script:Window.Close()
 }
@@ -2272,6 +2797,11 @@ function Close-Window([int]$Code) {
 function Invoke-Cancel {
     # The Cancel button and Esc.
     if ($ui.Overlay.Visibility -eq 'Visible') { Hide-Confirm; return }
+    if ($script:Py) {
+        # Esc ends a download; a running Python installer is only ended after the question
+        if ($script:Py.Phase -eq 'installing') { if ($script:Py.OfferStop) { Show-PythonStopConfirm }; return }
+        [void](Stop-PythonDownload); return
+    }
     switch ($script:Page) {
         'install' {
             if ($script:Run -and -not $script:StopRequested) { Show-Confirm }
@@ -2286,6 +2816,14 @@ function On-Closing($e) {
         $e.Cancel = $true
         if (-not $script:StopRequested) { Show-Confirm }
         return
+    }
+    if ($script:Py) {
+        if (-not (Stop-PythonDownload)) {
+            # The Python installer is running: closing asks the same question as "Stop waiting".
+            $e.Cancel = $true
+            if ($script:Py.Phase -eq 'installing') { $script:ClosePending = $true; Show-PythonStopConfirm }
+            return
+        }
     }
     if ($script:Run) { Stop-EngineTree; $script:Run = $null }
     if ($null -eq $script:ExitCode) { $script:ExitCode = Get-CancelCode }
@@ -2348,6 +2886,7 @@ function Copy-Details {
 }
 
 function Open-TextInstaller {
+    if ($FromSetupExe) { return }      # the Setup.exe's folder goes away when it ends
     Start-TextInstallerFallback 'The setup window could not continue'
     Close-Window (Get-CancelCode)
 }
@@ -2390,6 +2929,56 @@ function Set-TitleBar {
             [void][HttSetupNative]::SetInt($script:Hwnd, $pair[0], $ref)
         }
     } catch { }
+}
+
+function Add-LineReader {
+    # Line reading for the engine's output: only a line feed ends a line (see HttLfReader).
+    if ('HttLfReader' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+// Reads lines where only a line feed ends a line (a lone carriage return does not,
+// unlike StreamReader.ReadLine). A carriage return just before the line feed is dropped.
+public class HttLfReader {
+    readonly TextReader r;
+    readonly StringBuilder sb = new StringBuilder();
+    readonly char[] buf = new char[4096];
+    bool eof;
+    readonly int limit;
+    bool carry;
+    // True when the line just returned must not be believed as a marker: it was cut
+    // because the buffer limit was reached without a line feed, or it is the line
+    // right after such a cut (its start may be the tail of the same long line).
+    public bool Untrusted { get; private set; }
+    public HttLfReader(TextReader reader) : this(reader, 1000000) { }
+    public HttLfReader(TextReader reader, int maxLine) { r = reader; limit = maxLine; }
+    public Task<string> ReadLineAsync() { return Core(); }
+    static string Trim(string s) { return (s.Length > 0 && s[s.Length - 1] == '\r') ? s.Substring(0, s.Length - 1) : s; }
+    async Task<string> Core() {
+        int from = 0;
+        while (true) {
+            for (int i = from; i < sb.Length; i++) {
+                if (sb[i] == '\n') {
+                    string line = sb.ToString(0, i);
+                    sb.Remove(0, i + 1);
+                    Untrusted = carry; carry = false;
+                    return Trim(line);
+                }
+            }
+            from = sb.Length;
+            if (sb.Length > limit) { string big = sb.ToString(); sb.Clear(); Untrusted = true; carry = true; return big; }
+            if (eof) {
+                if (sb.Length == 0) return null;
+                string last = sb.ToString(); sb.Clear(); Untrusted = carry; carry = false; return Trim(last);
+            }
+            int n = await r.ReadAsync(buf, 0, buf.Length);
+            if (n <= 0) eof = true; else sb.Append(buf, 0, n);
+        }
+    }
+}
+'@
 }
 
 function Add-Native {
@@ -2464,11 +3053,13 @@ function Reset-Ui {
     Hide-Confirm
     $script:Outcome = $null; $script:ResultKind = $null; $script:ExitCode = $null; $script:ClosedWith = $null
     $script:Checking = $false
+    $script:Py = $null
     $ui.AgreeBox.IsChecked = $false
     $script:TermsOk = $false; $script:TermsVersion = $null
     $ui.CheckingRow.Visibility = 'Collapsed'; $ui.RecheckRow.Visibility = 'Collapsed'
     $ui.LinkStatus.Visibility = 'Collapsed'; $ui.ChooseNote.Visibility = 'Collapsed'; $ui.PythonNote.Visibility = 'Collapsed'
-    $ui.DetailsExp.IsExpanded = $false; $ui.PythonDetails.IsExpanded = $false
+    $ui.DetailsExp.IsExpanded = $false; $ui.PyManual.IsExpanded = $false
+    $script:PyLastError = $null; Set-Shown $ui.PyError $false; Set-Shown $ui.PyProgressPanel $false
     $ui.Root.UpdateLayout()
 }
 
@@ -2523,7 +3114,15 @@ function Invoke-Shots([string]$Folder) {
         @{ Name = '06-choices-nvidia'; Go = { Set-Facts (Get-CannedFacts @{ Gpu = $true }); Set-TermsBoxForTest $true; Show-Page 'choose' }; Bottom = 'PageChoose' },
         @{ Name = '07-choices-no-nvidia-model-later'; Go = { Set-Facts (Get-CannedFacts @{ }); Set-TermsBoxForTest $true; $ui.ModelBox.IsChecked = $false; $ui.DesktopBox.IsChecked = $false; Update-Plan; Show-Page 'choose' }; Bottom = 'PageChoose' },
         @{ Name = '08-choices-update-low-disk'; Go = { Set-Facts (Get-CannedFacts @{ Gpu = $true; GpuReady = $true; ModelPresent = $true; Installed = '0.8.2'; LowDisk = $true }); Set-TermsBoxForTest $true; Show-Page 'choose' }; Bottom = 'PageChoose' },
-        @{ Name = '09-choices-python-missing'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'; $ui.PythonDetails.IsExpanded = $true }; Bottom = 'PageChoose' },
+        @{ Name = '09-choices-python-missing'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'}; Bottom = 'PageChoose' },
+        @{ Name = '09c-python-downloading'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'
+                $script:Py = @{ Phase = 'download' }; Set-PythonStatus 'Downloading Python... 11 MB of 27 MB' 0.42; Update-PythonUi }; Bottom = 'PageChoose' },
+        @{ Name = '09c2-python-stop-waiting'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'
+                $script:Py = @{ Phase = 'installing'; OfferStop = $true }; Set-PythonStatus 'The Python installer is taking a long time (more than 15 minutes). You can keep waiting, or stop waiting.' $null; Update-PythonUi }; Bottom = 'PageChoose' },
+        @{ Name = '09d-python-error'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'
+                $script:PyLastError = 'The downloaded file is not the one that was expected (its checksum does not match), so it was not used.'; Update-PythonUi }; Bottom = 'PageChoose' },
+        @{ Name = '09e-python-manual'; Go = { Set-Facts (Get-CannedFacts @{ NoPython = $true }); Set-TermsBoxForTest $true; Show-Page 'choose'
+                $ui.PyManual.IsExpanded = $true }; Bottom = 'PageChoose' },
         @{ Name = '10-installing'; Go = {
                 Set-Facts (Get-CannedFacts @{ Gpu = $true }); Initialize-Progress @($script:Facts.steps); Show-Page 'install'
                 foreach ($l in (Get-ProgressLines 5)) { Receive-ProgressLine $l }
@@ -2813,6 +3412,28 @@ function Invoke-SelfTest {
     Check ($null -eq $script:PendingFacts) 'a facts marker on stderr was believed'
     Receive-EngineLine ('@@htt ' + (ConvertTo-Json -Compress -InputObject @{ kind = 'facts' })) 'check' $true
     Check ($null -ne $script:PendingFacts) 'a facts marker on stdout was not believed'
+    # a lone carriage return never starts a marker (only a line feed ends a line)
+    Add-LineReader
+    $rd = New-Object HttLfReader((New-Object IO.StringReader("one`rtwo`n@@htt {`"kind`":`"done`"}`r`nforged`r@@htt {`"kind`":`"error`",`"text`":`"forged`"}`r`nlast")))
+    $got = @(); while ($true) { $l = $rd.ReadLineAsync().Result; if ($null -eq $l) { break }; $got += , $l }
+    Check ($got.Count -eq 4 -and $got[0] -eq "one`rtwo" -and $got[1] -eq '@@htt {"kind":"done"}' -and $got[2].StartsWith("forged`r@@htt ") -and $got[3] -eq 'last') "the line reader split at a lone carriage return or kept a CR before LF ($($got.Count) lines)"
+    # a line cut at the buffer limit, and the line returned after it, are never markers
+    $rd = New-Object HttLfReader((New-Object IO.StringReader(('y' * 4096) + '@@htt {"kind":"done"}' + "`n" + '@@htt {"kind":"warning","text":"w"}' + "`nlast")), 100)
+    $seq = @(); while ($true) { $l = $rd.ReadLineAsync().Result; if ($null -eq $l) { break }; $seq += , @($l, $rd.Untrusted) }
+    Check ($seq.Count -eq 4) "the cut reader returned $($seq.Count) lines, not 4"
+    if ($seq.Count -eq 4) {
+        Check ($seq[0][0].Length -eq 4096 -and $seq[0][1] -eq $true) 'the reader: the piece cut at the limit is not untrusted'
+        Check ($seq[1][0] -eq '@@htt {"kind":"done"}' -and $seq[1][1] -eq $true) 'the reader: the line after a cut piece is trusted'
+        Check ($seq[2][0] -match '^@@htt ' -and $seq[2][1] -eq $false -and $seq[3][0] -eq 'last' -and $seq[3][1] -eq $false) 'the reader: later lines stay untrusted'
+    }
+    $script:DoneInfo = $null; $script:ErrorText = $null
+    Receive-RawLine $got[2] 'progress' $true
+    Flush-Log
+    Check ($null -eq $script:ErrorText) 'a marker after a lone carriage return was believed'
+    Check ($ui.LogBox.Text -match 'forged') 'the text after a lone carriage return is not in the details'
+    Receive-RawLine $got[1] 'progress' $true
+    Check ($null -ne $script:DoneInfo) 'a normal marker was no longer believed after the reader change'
+    $script:DoneInfo = $null
 
     # step markers: only a whole number from 1 to the number of titles
     Initialize-Progress @($script:Facts.steps); $script:Page = 'install'
@@ -2947,6 +3568,251 @@ function Invoke-SelfTest {
     Complete-Check 0
     Check ($script:Mode -eq 'update' -and [string]$ui.NextBtn.Content -eq 'Update' -and $ui.InstallTitle.Text -eq 'Updating Hold to talk') "Check again to update: $($script:Mode) / $($ui.NextBtn.Content)"
 
+    # "Install Python for me": the text before the click, the pin, the stub in test mode, the checks, cancel
+    Reset-Ui
+    Set-Facts (Get-CannedFacts @{ NoPython = $true })
+    Show-Page 'choose'
+    Check ($ui.PythonPanel.Visibility -eq 'Visible') 'python panel: not shown'
+    Check ([string]$ui.PyInstallBtn.Content -eq 'Install Python for me' -and (Pressable $ui.PyInstallBtn)) 'python panel: no "Install Python for me" button'
+    Check ($ui.PyInstallBtn.Style -eq $ui.Root.FindResource('Primary')) 'python panel: "Install Python for me" is not the primary button'
+    Check ($ui.PythonOrgBtn.Style -ne $ui.Root.FindResource('Primary') -and (Pressable $ui.PythonOrgBtn) -and (Pressable $ui.CheckAgainBtn)) 'python panel: the two other buttons changed'
+    Check ($ui.PyLead.Text -eq 'Python is a free program that Hold to talk needs. Choose the button and Setup downloads it from python.org (about 27 MB) and installs it for your Windows account only. Nothing is downloaded until you choose the button.') "python panel: the lead changed: $($ui.PyLead.Text)"
+    Check ($ui.PyManual.Header -eq 'Details' -and -not $ui.PyManual.IsExpanded) 'python panel: the Details expander is missing or open'
+    $what = $ui.PyLead.Text + ' ' + $ui.PyWhat.Text
+    foreach ($needle in @('official Python 3.12.10 installer', 'python.org', 'about 27 MB', 'installed for this Windows account only', 'with the "py" launcher', 'no administrator rights', 'does not add python.exe to your PATH', 'no file associations', 'Nothing is downloaded until', 'fixed fingerprint', 'Python Software Foundation', 'ARM')) {
+        Check ($what.Contains($needle)) "python panel: the text before the click lacks '$needle'"
+    }
+    Check ($what -notmatch 'PATH setting is not') 'python panel: still claims that PATH is untouched'
+    Check ($ui.PyLicence.Text -match 'PSF License' -and $ui.PyLicence.Text -match 'own licence') 'python panel: the PSF License is not mentioned'
+    Check ($ui.PyProgressPanel.Visibility -ne 'Visible' -and $ui.PyError.Visibility -ne 'Visible') 'python panel: progress or error shown before the click'
+    $pin = $script:PyPin
+    Check ($pin.Url -match '^https://www\.python\.org/ftp/python/3\.12\.\d+/python-3\.12\.\d+-amd64\.exe$' -and $pin.Url.Contains($pin.Version)) 'python pin: the address is not the official one'
+    Check ($pin.Sha256 -match '^[0-9a-f]{64}$' -and $pin.Bytes -gt 1000000) 'python pin: checksum or size missing'
+    Check (($pin.Args -join ' ') -eq '/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1 InstallLauncherAllUsers=0 Include_tcltk=1 Include_test=0 SimpleInstall=1 AssociateFiles=0 Shortcuts=0') 'python pin: the installer options changed'
+
+    # in test mode the button calls the stub: nothing is downloaded, run or made
+    $before = $script:EngineCalls.Count
+    $tempBefore = @(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'htt-py-*' -ErrorAction SilentlyContinue).Count
+    Check ($null -eq $script:PyOpen -and $null -eq $script:PyRun) 'python: a test hook is set before the test'
+    Press $ui.PyInstallBtn
+    Check ($script:PyInstallCalls.Count -eq 1) 'python: the stub was not called in test mode'
+    Check ($null -eq $script:Py) 'python: a download was started in test mode'
+    Check ($script:EngineCalls.Count -eq $before + 1 -and $script:EngineCalls[$script:EngineCalls.Count - 1].Args[0] -eq '-Check') 'python: the stub is not followed by Check again'
+    Check (@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'htt-py-*' -ErrorAction SilentlyContinue).Count -eq $tempBefore) 'python: a folder was made in test mode'
+    $refusedDl = $false
+    try { Start-PythonDownload } catch { $refusedDl = $true }
+    Check $refusedDl 'python: the real download could be started in test mode'
+    $script:Checking = $false; $script:Run = $null; Update-PythonUi
+    [Environment]::SetEnvironmentVariable('HTT_FAKE_PYTHON_INSTALLED', $null, 'Process')
+
+    # the two checks, with small local files and a fake signature reader (never the network)
+    $pyTmp = Join-Path ([IO.Path]::GetTempPath()) ('htt-selftest-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $pyTmp | Out-Null
+    try {
+        $good = Join-Path $pyTmp 'good.bin'
+        [IO.File]::WriteAllBytes($good, [byte[]](1..200 | ForEach-Object { $_ % 251 }))
+        $bad = Join-Path $pyTmp 'bad.bin'
+        $bytes = [IO.File]::ReadAllBytes($good); $bytes[10] = 99; [IO.File]::WriteAllBytes($bad, $bytes)
+        $big = Join-Path $pyTmp 'big.bin'
+        $rng = New-Object Random 7; $bb = New-Object byte[] 3000000; $rng.NextBytes($bb); [IO.File]::WriteAllBytes($big, $bb)
+        $realPin = $script:PyPin
+        $testPin = { param($f) [pscustomobject]@{ Version = '0.0.1'; Url = $realPin.Url; HostName = $realPin.HostName; Bytes = [int64](Get-Item -LiteralPath $f).Length
+                       Sha256 = (Get-FileSha256 $f); Signer = $realPin.Signer; Args = $realPin.Args } }
+        $pinGood = & $testPin $good
+        $pinBig = & $testPin $big
+        $okSig = { param($p) @{ Status = 'Valid'; Subject = 'CN=Python Software Foundation, O=Python Software Foundation, C=US' } }
+        $script:PyGetSignature = $okSig
+        Check ($null -eq (Test-PythonInstaller $good $pinGood)) 'verify: a good file with a good signature was refused'
+        Check ($null -ne (Test-PythonInstaller $bad $pinGood)) 'verify: a file with another hash was accepted'
+        Check ((Test-PythonInstaller $bad $pinGood) -match 'checksum') 'verify: a hash mismatch does not say so'
+        Check ($null -ne (Test-PythonInstaller (Join-Path $pyTmp 'nope.bin') $pinGood)) 'verify: a missing file was accepted'
+        $pinSize = $pinGood.PSObject.Copy(); $pinSize.Bytes = $pinGood.Bytes + 1
+        Check ($null -ne (Test-PythonInstaller $good $pinSize)) 'verify: a file of another size was accepted'
+        foreach ($case in @(@('NotSigned', 'CN=Python Software Foundation'), @('HashMismatch', 'CN=Python Software Foundation'), @('UnknownError', 'CN=Python Software Foundation'),
+                            @('Valid', 'CN=Somebody Else, O=Somebody Else'), @('Valid', ''))) {
+            $st = $case[0]; $sj = $case[1]
+            $script:PyGetSignature = { param($p) @{ Status = $st; Subject = $sj } }.GetNewClosure()
+            Check ($null -ne (Test-PythonInstaller $good $pinGood)) "verify: signature $st / '$sj' was accepted"
+        }
+        $script:PyGetSignature = { param($p) throw 'no signature reader' }
+        Check ($null -ne (Test-PythonInstaller $good $pinGood)) 'verify: a failing signature reader was accepted'
+        # the real reader: an unsigned file is not Valid; a file Windows signed is Valid but not by the PSF
+        $script:PyGetSignature = $null
+        Check ($null -ne (Test-PythonInstaller $good $pinGood)) 'verify: an unsigned file was accepted by the real reader'
+        $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        $realSig = Get-InstallerSignature $cmdExe
+        if ($realSig.Status -eq 'Valid') {
+            Check ($realSig.Subject -notmatch 'Python Software Foundation') 'verify: cmd.exe claims to be the PSF'
+            $pinCmd = & $testPin $cmdExe
+            Check ((Test-PythonInstaller $cmdExe $pinCmd) -match 'not signed by the Python Software Foundation') 'verify: a file signed by someone else was accepted'
+        }
+
+        # the whole run with a local source and a fake installer program
+        $script:PyGetSignature = $okSig
+        $script:Ran = New-Object Collections.Generic.List[string]
+        $script:PyRun = { param($f, $a) $script:Ran.Add("$f|$a"); [pscustomobject]@{ HasExited = $true; ExitCode = $script:FakeExit } }
+        function Invoke-PyRunToEnd([string]$Src, $UsePin) {
+            $script:PyPin = $UsePin
+            $script:PyOpen = { param($u) @{ Stream = [IO.File]::OpenRead($script:PySrc); Length = [int64](Get-Item -LiteralPath $script:PySrc).Length } }
+            $script:PySrc = $Src
+            $script:PyLastError = $null; $script:Ran.Clear()
+            $script:Checking = $false; $script:Run = $null
+            Start-PythonInstall
+            $dir = $null
+            for ($k = 0; $k -lt 400 -and $script:Py; $k++) {
+                if ($script:Py.Dir) { $dir = $script:Py.Dir }
+                Step-PythonRun
+            }
+            return $dir
+        }
+        $script:FakeExit = 0
+        $calls = $script:EngineCalls.Count
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($null -eq $script:Py -and $null -eq $script:PyLastError) "python run: did not finish cleanly ($script:PyLastError)"
+        Check ($script:Ran.Count -eq 1 -and $script:Ran[0].EndsWith('|/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1 InstallLauncherAllUsers=0 Include_tcltk=1 Include_test=0 SimpleInstall=1 AssociateFiles=0 Shortcuts=0')) "python run: the installer was run with '$($script:Ran -join ';')'"
+        Check ($dir -and -not (Test-Path -LiteralPath $dir)) 'python run: the installer folder is left behind after a good run'
+        Check ($script:EngineCalls.Count -eq $calls + 1 -and $script:EngineCalls[$script:EngineCalls.Count - 1].Args[0] -eq '-Check') 'python run: the page does not run Check again after the install'
+        $script:Checking = $false; $script:Run = $null
+        # a wrong hash, a bad signature: refused, nothing is run, the file is deleted, a plain error is shown
+        $dir = Invoke-PyRunToEnd $bad $pinGood
+        Check ($script:Ran.Count -eq 0) 'python run: a file with the wrong hash was run'
+        Check ($dir -and -not (Test-Path -LiteralPath $dir)) 'python run: the wrong file was not deleted'
+        Check ($script:PyLastError -match 'checksum' -and $ui.PyError.Visibility -eq 'Visible' -and $ui.PyError.Text -match 'checksum') 'python run: no plain error for a wrong hash'
+        $script:PyGetSignature = { param($p) @{ Status = 'NotSigned'; Subject = '' } }
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($script:Ran.Count -eq 0) 'python run: a file with a bad signature was run'
+        Check ($dir -and -not (Test-Path -LiteralPath $dir)) 'python run: the badly signed file was not deleted'
+        Check ($script:PyLastError -match 'no valid signature') 'python run: no plain error for a bad signature'
+        $script:PyGetSignature = { param($p) @{ Status = 'Valid'; Subject = 'CN=Somebody Else' } }
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($script:Ran.Count -eq 0 -and $script:PyLastError -match 'not signed by the Python Software Foundation') 'python run: a signature of someone else was run'
+        $script:PyGetSignature = $okSig
+        # a server that sends a different size
+        $dir = Invoke-PyRunToEnd $big $pinGood
+        Check ($script:Ran.Count -eq 0 -and $null -eq $script:Py -and $script:PyLastError -match 'size') 'python run: a source of another size was used'
+        # a non-zero exit code of the installer is a failure
+        $script:FakeExit = 1603
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($script:Ran.Count -eq 1 -and $script:PyLastError -match '1603' -and $null -eq $script:Py) 'python run: a failing installer is not reported'
+        Check ($dir -and -not (Test-Path -LiteralPath $dir)) 'python run: the folder is left behind after a failing installer'
+        $script:FakeExit = 0
+        # Cancel: stops, and deletes the partial file
+        $script:PyPin = $pinBig
+        $script:PySrc = $big
+        $script:PyOpen = { param($u) @{ Stream = [IO.File]::OpenRead($script:PySrc); Length = [int64](Get-Item -LiteralPath $script:PySrc).Length } }
+        $script:PyLastError = $null; $script:Ran.Clear()
+        Start-PythonInstall
+        $dir = $script:Py.Dir
+        for ($k = 0; $k -lt 3; $k++) { Step-PythonRun }
+        $partial = Join-Path $dir ('python-' + $pinBig.Version + '-amd64.exe')
+        Check ($script:Py.Phase -eq 'download' -and (Test-Path -LiteralPath $partial) -and $script:Py.Got -gt 0 -and $script:Py.Got -lt $pinBig.Bytes) 'python cancel: the test did not get a partial file'
+        Check (Pressable $ui.PyCancelBtn) 'python cancel: no Cancel button while downloading'
+        Check (-not $ui.CheckAgainBtn.IsEnabled -and -not $ui.PyInstallBtn.IsEnabled) 'python: the other buttons are usable while downloading'
+        Press $ui.PyCancelBtn
+        Check ($null -eq $script:Py) 'python cancel: the run goes on'
+        Check (-not (Test-Path -LiteralPath $partial) -and -not (Test-Path -LiteralPath $dir)) 'python cancel: the partial file was not deleted'
+        Check ($script:Ran.Count -eq 0) 'python cancel: something was run'
+        Check ($ui.PythonNote.Text -match 'cancelled' -and $ui.PyCancelBtn.Visibility -ne 'Visible' -and (Pressable $ui.PyInstallBtn)) 'python cancel: the panel did not return to its first state'
+        # Esc during the download cancels it too, and the window stays
+        Start-PythonInstall
+        $dir = $script:Py.Dir
+        Step-PythonRun
+        Invoke-Cancel
+        Check ($null -eq $script:Py -and -not (Test-Path -LiteralPath $dir) -and $null -eq $script:ClosedWith) 'python cancel: Esc did not cancel the download alone'
+        # a Python installer that is running is not interrupted by Esc or by closing
+        $script:PyRun = { param($f, $a) [pscustomobject]@{ HasExited = $false; ExitCode = 0 } }
+        Start-PythonInstall
+        $dir = $script:Py.Dir
+        for ($k = 0; $k -lt 400 -and $script:Py -and $script:Py.Phase -ne 'installing'; $k++) { Step-PythonRun }
+        Check ($script:Py.Phase -eq 'installing' -and $ui.PyCancelBtn.Visibility -ne 'Visible') 'python: the installing phase was not reached or shows Cancel'
+        Invoke-Cancel
+        Check ($null -ne $script:Py -and $null -eq $script:ClosedWith) 'python: Esc interrupted a running Python installer'
+        $ev = New-Object ComponentModel.CancelEventArgs
+        On-Closing $ev
+        Check $ev.Cancel 'python: the window could be closed while the Python installer runs'
+        # closing during the run asks the question "Stop waiting for Python?" instead of being refused outright
+        Check ($ui.Overlay.Visibility -eq 'Visible' -and $ui.StopTitle.Text -match 'Stop waiting' -and $ui.StopBtn.Content -eq 'Stop waiting' -and $ui.KeepBtn.Content -eq 'Keep waiting') 'python: closing during the run did not ask "Stop waiting?"'
+        Check ($null -ne $script:Py) 'python: the run ended before the question was answered'
+        Press $ui.KeepBtn
+        Check ($ui.Overlay.Visibility -ne 'Visible' -and $null -ne $script:Py -and $ui.StopTitle.Text -notmatch 'waiting') 'python: Keep waiting did not restore the window'
+        # the same question from closing, answered with Stop waiting: ends only the process it started
+        $script:Killed = 0
+        $fake = [pscustomobject]@{ HasExited = $false; ExitCode = 0 }
+        $fake | Add-Member -MemberType ScriptMethod -Name Kill -Value { $script:Killed++; $this.HasExited = $true }
+        $fake | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($ms) return $true }
+        $script:Py.Proc = $fake
+        $script:ClosedWith = $null
+        $ev = New-Object ComponentModel.CancelEventArgs
+        On-Closing $ev
+        Check ($ev.Cancel -and $ui.Overlay.Visibility -eq 'Visible') 'python: the second close did not ask again'
+        Press $ui.StopBtn
+        Check ($script:Killed -eq 1 -and $null -eq $script:Py -and $script:ClosedWith -eq (Get-CancelCode)) 'python: Stop waiting from the close question did not end the process and close'
+        Check (-not (Test-Path -LiteralPath $dir)) 'python: the folder was left behind after Stop waiting'
+        Check ($script:PyLastError -match 'Stopped waiting' -and $ui.PyManual.IsExpanded) 'python: Stop waiting did not show the manual route'
+        Check ($ui.StopTitle.Text -notmatch 'waiting') 'python: the question texts were not restored'
+        $script:ClosedWith = $null; $script:PyLastError = $null; $ui.PyManual.IsExpanded = $false
+        # after the timeout the window offers "Stop waiting"
+        $script:PyTimeoutSeconds = 0
+        Start-PythonInstall
+        $dir = $script:Py.Dir
+        for ($k = 0; $k -lt 400 -and $script:Py -and $script:Py.Phase -ne 'installing'; $k++) { Step-PythonRun }
+        Check (-not (Pressable $ui.PyStopBtn)) 'python: "Stop waiting" is shown before the timeout was seen'
+        Step-PythonRun
+        Check ($script:Py.OfferStop -and (Pressable $ui.PyStopBtn) -and $ui.PyStatus.Text -match 'taking a long time') 'python: no "Stop waiting" after the timeout'
+        $script:Killed = 0
+        $fake2 = [pscustomobject]@{ HasExited = $false; ExitCode = 0 }
+        $fake2 | Add-Member -MemberType ScriptMethod -Name Kill -Value { $script:Killed++; $this.HasExited = $true }
+        $fake2 | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($ms) return $true }
+        $script:Py.Proc = $fake2
+        Press $ui.PyStopBtn
+        Check ($ui.Overlay.Visibility -eq 'Visible' -and $script:Killed -eq 0) 'python: the button killed the process without asking'
+        Press $ui.StopBtn
+        Check ($script:Killed -eq 1 -and $null -eq $script:Py -and -not (Test-Path -LiteralPath $dir)) 'python: Stop waiting did not end and clean up'
+        Check ($null -eq $script:ClosedWith) 'python: Stop waiting closed the window'
+        Check ($script:PyLastError -match 'Stopped waiting' -and -not (Pressable $ui.PyStopBtn)) 'python: the panel did not return to its first state after Stop waiting'
+        $script:PyTimeoutSeconds = 900; $script:PyLastError = $null; $ui.PyManual.IsExpanded = $false
+        # exit code 3010 (restart may be needed) is a success
+        $script:FakeExit = 3010
+        $script:PyRun = { param($f, $a) [pscustomobject]@{ HasExited = $true; ExitCode = $script:FakeExit } }
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($null -eq $script:Py -and $null -eq $script:PyLastError -and $ui.PythonNote.Text -match 'restart later') "python: exit code 3010 was not a success ($script:PyLastError / $($ui.PythonNote.Text))"
+        $script:Checking = $false; $script:Run = $null
+        # the file is held open (read, nobody may write) from the check until the installer has started
+        $script:LockSeen = $null
+        $script:PyRun = { param($f, $a, $lock)
+            $script:LockSeen = @{ Open = ($null -ne $lock); Write = $null; Rename = $null }
+            try { $w = [IO.File]::Open($f, 'Open', 'Write', 'ReadWrite'); $w.Dispose(); $script:LockSeen.Write = $true } catch { $script:LockSeen.Write = $false }
+            try { Rename-Item -LiteralPath $f -NewName 'moved.exe' -ErrorAction Stop; $script:LockSeen.Rename = $true; Rename-Item -LiteralPath (Join-Path (Split-Path -Parent $f) 'moved.exe') -NewName (Split-Path -Leaf $f) } catch { $script:LockSeen.Rename = $false }
+            [pscustomobject]@{ HasExited = $true; ExitCode = 0 } }
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        Check ($script:LockSeen -and $script:LockSeen.Open -and -not $script:LockSeen.Write -and -not $script:LockSeen.Rename) 'python: the installer file was not locked against writing and renaming while the installer started'
+        Check ($dir -and -not (Test-Path -LiteralPath $dir)) 'python: the folder was left behind (a handle on the file was not released)'
+        $script:Checking = $false; $script:Run = $null
+        # a folder that cannot be made private stops the run with a plain error
+        $script:PyRun = { param($f, $a) [pscustomobject]@{ HasExited = $true; ExitCode = 0 } }
+        $script:FailAcl = $true
+        $script:Ran.Clear()
+        $dir = Invoke-PyRunToEnd $good $pinGood
+        $script:FailAcl = $false
+        Check ($null -eq $script:Py -and $script:Ran.Count -eq 0 -and $script:PyLastError -match 'private folder') "python: a failing ACL did not stop the run ($script:PyLastError)"
+        # (an existing run continues below)
+        $script:PyRun = { param($f, $a) [pscustomobject]@{ HasExited = $false; ExitCode = 0 } }
+        Start-PythonInstall
+        $dir = $script:Py.Dir
+        for ($k = 0; $k -lt 400 -and $script:Py -and $script:Py.Phase -ne 'installing'; $k++) { Step-PythonRun }
+        $script:Py.Proc = [pscustomobject]@{ HasExited = $true; ExitCode = 0 }
+        Step-PythonRun
+        Check ($null -eq $script:Py -and -not (Test-Path -LiteralPath $dir)) 'python: the run did not end after the installer ended'
+        $script:Checking = $false; $script:Run = $null
+    } finally {
+        $script:PyOpen = $null; $script:PyRun = $null; $script:PyGetSignature = $null; $script:PyPin = $realPin
+        $script:Py = $null; $script:PyLastError = $null; $script:Checking = $false; $script:Run = $null
+        Remove-Item -LiteralPath $pyTmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Check (@(Get-ChildItem -LiteralPath ([IO.Path]::GetTempPath()) -Directory -Filter 'htt-py-*' -ErrorAction SilentlyContinue).Count -eq $tempBefore) 'python: a folder htt-py-* is left in the temp folder'
+    $script:ClosedWith = $null
+    Update-PythonUi
+
     # the sandbox rule of -AutoRun and -Engine
     $tmp = [IO.Path]::GetTempPath().TrimEnd('\')
     $ok4 = @("$tmp\htt-x\prog", "$tmp\htt-x\home\venv", "$tmp\htt-x\sm", "$tmp\htt-x\dt")
@@ -2964,6 +3830,81 @@ function Invoke-SelfTest {
         $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($tmp).ShortPath
         Check ($null -eq (Get-SandboxProblem @("$short\htt-x\a", "$short\htt-x\b", "$short\htt-x\c", "$short\htt-x\d") $key)) 'the short (8.3) form of the temp folder was refused'
     } catch { }
+
+    # the data folder from the environment must lead nowhere outside the temp folder either
+    $envOld = @{}
+    foreach ($n in 'HOLDTOTALK_HOME', 'HTT_ENV_DIR', 'HTT_INSTALL_ROOT', 'HTT_START_MENU_DIR', 'HTT_DESKTOP_DIR') { $envOld[$n] = [Environment]::GetEnvironmentVariable($n) }
+    try {
+        foreach ($n in $envOld.Keys) { [Environment]::SetEnvironmentVariable($n, $null) }
+        Check ($null -eq (Get-SandboxProblem $ok4 $key)) 'sandbox: refused with no environment variable set'
+        [Environment]::SetEnvironmentVariable('HOLDTOTALK_HOME', "$tmp\htt-x\data")
+        Check ($null -eq (Get-SandboxProblem $ok4 $key)) 'sandbox: a data folder under the temp folder was refused'
+        [Environment]::SetEnvironmentVariable('HOLDTOTALK_HOME', 'C:\Users\you\data')
+        Check ((Get-SandboxProblem $ok4 $key) -match 'HOLDTOTALK_HOME') 'sandbox: HOLDTOTALK_HOME outside the temp folder was accepted'
+        [Environment]::SetEnvironmentVariable('HOLDTOTALK_HOME', "$tmp\..\elsewhere")
+        Check ((Get-SandboxProblem $ok4 $key) -match 'HOLDTOTALK_HOME') 'sandbox: HOLDTOTALK_HOME climbing out of the temp folder was accepted'
+        [Environment]::SetEnvironmentVariable('HOLDTOTALK_HOME', $tmp)
+        Check ($null -ne (Get-SandboxProblem $ok4 $key)) 'sandbox: HOLDTOTALK_HOME equal to the temp folder was accepted'
+        [Environment]::SetEnvironmentVariable('HOLDTOTALK_HOME', $null)
+        [Environment]::SetEnvironmentVariable('HTT_ENV_DIR', 'C:\Users\you\venv')
+        Check ((Get-SandboxProblem $ok4 $key) -match 'HTT_ENV_DIR') 'sandbox: HTT_ENV_DIR outside the temp folder was accepted'
+    } finally {
+        foreach ($n in $envOld.Keys) { [Environment]::SetEnvironmentVariable($n, $envOld[$n]) }
+    }
+
+    # the Setup.exe route: no text installer, a plain pointer to the project's page, documents opened from a copy
+    $wasExe = $FromSetupExe
+    try {
+        $script:FromSetupExe = [switch]$false
+        Check ((Get-DownloadAdvice $false) -match 'Extract the whole ZIP first') 'zip route: the extract advice changed'
+        $script:FromSetupExe = [switch]$true
+        foreach ($again in $true, $false) {
+            $adv = Get-DownloadAdvice $again
+            Check ($adv -match "project's page" -and $adv -match 'install\.bat' -and $adv -notmatch 'Extract the whole ZIP') "setup.exe route: the advice is '$adv'"
+        }
+        $before = $script:ClosedWith
+        Open-TextInstaller
+        Check ($script:ClosedWith -eq $before) 'setup.exe route: the text installer button closed the window'
+        $env:HTT_FALLBACK_REASON = ''
+        Start-TextInstallerFallback 'test'
+        Check ([string]$env:HTT_FALLBACK_REASON -eq '') 'setup.exe route: the text installer fallback started'
+        $text = [IO.File]::ReadAllText($ScriptPath)
+        $text = $text.Substring(0, $text.IndexOf('function Invoke-' + 'SelfTest'))
+        Check (([regex]::Matches($text, 'Extract the whole ZIP')).Count -eq 2) 'the Extract the whole ZIP wording is used outside Get-DownloadAdvice'
+        # documents: a copy in a private folder of its own, deleted by Remove-DocumentCopies
+        $copy = Get-DocumentPath 'TERMS.md'
+        Check ($copy -ne (Join-Path $Here 'TERMS.md') -and (Test-Path -LiteralPath $copy) -and (Split-Path -Leaf (Split-Path -Parent $copy)) -match '^htt-doc-[0-9a-f]{32}$') "setup.exe route: the document was not copied to a private folder ($copy)"
+        Check ((Get-Item -LiteralPath $copy).Length -eq (Get-Item -LiteralPath (Join-Path $Here 'TERMS.md')).Length) 'setup.exe route: the copy differs'
+        $docDir = Split-Path -Parent $copy
+        Remove-DocumentCopies
+        Check (-not (Test-Path -LiteralPath $docDir)) 'setup.exe route: the copies were not deleted on exit'
+        # "run install.bat again" says "run Setup again" on this route (own wording), and an engine
+        # text that names install.bat gets one explaining line
+        Check ((Get-RunAgainName) -eq 'Setup') 'setup.exe route: the run-again name is not Setup'
+        Check ((Add-SetupExeHint 'Run install.bat again to retry.') -eq "Run install.bat again to retry.`n(If you used the Setup file: run Setup again.)") 'setup.exe route: the engine hint changed'
+        Check ((Add-SetupExeHint 'Nothing to do with it.') -eq 'Nothing to do with it.') 'setup.exe route: a text without install.bat got the hint'
+        Reset-Ui
+        Set-Facts (Get-CannedFacts @{ Gpu = $true })
+        $script:Warnings = @('The NVIDIA runtime could not be installed. Run install.bat again to retry.')
+        $script:ErrorText = 'Installing the libraries failed. Run install.bat again; it carries on.'
+        $script:StopRequested = $true; Show-Result 'stopped' 1
+        Check ($ui.ResultLead.Text -match 'running Setup again' -and $ui.ResultLead.Text -notmatch 'install\.bat') "setup.exe route: stopped page says '$($ui.ResultLead.Text)'"
+        $script:StopRequested = $false; Show-Result 'failure' 1
+        Check ($ui.ResultLead.Text -match 'running Setup again' -and $ui.ResultLead.Text -notmatch 'install\.bat') "setup.exe route: failure page says '$($ui.ResultLead.Text)'"
+        Check ($ui.ErrorBox.Text -match 'If you used the Setup file: run Setup again\.') 'setup.exe route: the error text lacks the hint'
+        $script:DoneInfo = [pscustomobject]@{ desktopLnk = $null }
+        Show-Result 'success' 0
+        $warnText = [string]$ui.WarnList.Children[0].Child.Children[1].Text
+        Check ($warnText -match 'run Setup again') "setup.exe route: the warning lacks the hint ($warnText)"
+        $script:Warnings = @(); $script:ErrorText = $null; $script:DoneInfo = $null
+        $script:FromSetupExe = [switch]$false
+        Check ((Get-RunAgainName) -eq 'install.bat' -and (Add-SetupExeHint 'Run install.bat again') -eq 'Run install.bat again') 'zip route: the wording changed'
+        Show-Result 'stopped' 1
+        Check ($ui.ResultLead.Text -match 'running install\.bat again') 'zip route: the stopped page lost install.bat'
+        $script:FromSetupExe = [switch]$true
+        $script:FromSetupExe = [switch]$false
+        Check ((Get-DocumentPath 'TERMS.md') -eq (Join-Path $Here 'TERMS.md')) 'zip route: the document was copied'
+    } finally { $script:FromSetupExe = $wasExe }
 
     # the test switch guard
     $script:Harness = 'autorun'
@@ -3001,6 +3942,8 @@ function Invoke-AutoStep {
         'choose' {
             $a.Button = [string]$btn.Content
             if ($script:Facts.python.ok -ne $true) {
+                if ($AutoRun -eq 'install-python' -and -not $a.PyPressed) { $a.PyPressed = $true; Press-Auto $ui.PyInstallBtn; return }
+                if ($AutoRun -eq 'install-python' -and $script:Py) { return }
                 if (-not $a.Rechecked) { $a.Rechecked = $true; Press-Auto $ui.CheckAgainBtn }
                 else { Press-Auto $ui.CancelBtn }
                 return
@@ -3085,7 +4028,8 @@ try {
     $names = @('Root', 'Main', 'Pages', 'Overlay', 'RailIcon', 'RailSub', 'RailVersion', 'TestBadge', 'WelcomeIcon', 'WelcomeVersion', 'UpdateCard', 'UpdateText', 'AccountCard', 'AccountText', 'ChooseTitle', 'ChooseSub', 'ChooseFoot', 'InstallTitle', 'FailHead', 'StopTitle', 'StopBody', 'CheckingRow',
         'PageWelcome', 'PageTerms', 'PageChoose', 'PageInstall', 'InstallScroll', 'PageResult', 'PageError',
         'TermsLead', 'TermsView', 'AgreeBox', 'AgreeText', 'LinkNotepad', 'LinkLicense', 'LinkNotices', 'LinkSecurity', 'LinkStatus',
-        'RecheckRow', 'PythonPanel', 'PythonOrgBtn', 'CheckAgainBtn', 'PythonNote', 'PythonDetails', 'PythonNotes', 'PlanPanel',
+        'RecheckRow', 'PythonPanel', 'PythonOrgBtn', 'CheckAgainBtn', 'PythonNote', 'PythonNotes', 'PlanPanel',
+        'PyInstallBtn', 'PyLead', 'PyWhat', 'PyLicence', 'PyProgressPanel', 'PyStatus', 'PyBar', 'PyCancelBtn', 'PyStopBtn', 'PyError', 'PyManual',
         'ProgramWhat', 'ProgramOpen', 'ProgramPath', 'ProgramSize', 'EnvWhat', 'EnvOpen', 'EnvPath', 'EnvSize',
         'NvidiaRow', 'NvidiaBox', 'NvidiaTitle', 'NvidiaWhat', 'NvidiaOff', 'NvidiaSize', 'ModelBox', 'ModelTitle', 'ModelWhat', 'ModelOff', 'ModelSize',
         'DataOpen', 'DataPath', 'DesktopBox', 'TotalDownload', 'TotalDisk', 'FreeLabel', 'TotalFree', 'DiskWarn', 'DiskWarnText', 'ChooseNote',
@@ -3156,6 +4100,9 @@ try {
             else { Start-Process 'https://www.python.org/downloads/windows/' }
         } catch { }
     })
+    $ui.PyInstallBtn.Add_Click({ try { Start-PythonInstall } catch { Add-Log ('(window) ' + $_.Exception.Message) } })
+    $ui.PyCancelBtn.Add_Click({ try { [void](Stop-PythonDownload) } catch { } })
+    $ui.PyStopBtn.Add_Click({ try { Show-PythonStopConfirm } catch { } })
     $ui.TextInstallerBtn.Add_Click({ try { Open-TextInstaller } catch { } })
     $ui.DetailsExp.Add_Expanded({ try { Flush-Log; $ui.LogBox.ScrollToEnd(); $ui.InstallScroll.UpdateLayout(); $ui.InstallScroll.ScrollToBottom() } catch { } })
     $win.Add_PreviewKeyDown({
@@ -3187,7 +4134,7 @@ try {
         $exitCode = 0
     } else {
         if ($AutoRun) {
-            $script:Auto = @{ Started = Get-Date; Rechecked = $false; Chosen = $false; Stopped = $false }
+            $script:Auto = @{ Started = Get-Date; PyPressed = $false; Rechecked = $false; Chosen = $false; Stopped = $false }
             $win.WindowStartupLocation = 'Manual'
             $win.Left = -32000; $win.Top = -32000
             $win.ShowActivated = $false; $win.ShowInTaskbar = $false
@@ -3208,7 +4155,7 @@ try {
         if ($null -eq $exitCode) { $exitCode = Get-CancelCode }
         if ($script:Harness -eq 'autorun') {
             [Console]::Out.WriteLine("mode: $($script:Mode) | window: $($script:Window.Title) | rail: $($script:RailLabels[3]) / $($ui.RailSub.Text) | button: $($script:Auto.Button) | page title: $($ui.InstallTitle.Text) | result: $($ui.ResultTitle.Text) | lead: $($ui.ResultLead.Text)")
-            [Console]::Out.WriteLine("autorun: page=$($script:Page) result=$($script:ResultKind) exit=$exitCode steps=$($script:StepRows.Count)")
+            [Console]::Out.WriteLine("autorun: page=$($script:Page) result=$($script:ResultKind) exit=$exitCode steps=$($script:StepRows.Count) pyinstall=$($script:PyInstallCalls.Count)")
             if ($script:Page -eq 'error') { [Console]::Out.WriteLine('error page: ' + $ui.ErrTitle.Text + ' / ' + $ui.ErrText.Text) }
             $sc = Get-StartCommand
             if ($sc) { [Console]::Out.WriteLine('start-command: ' + $sc.Exe + ' | ' + $sc.Args + ' | ' + $sc.WorkDir) }
@@ -3222,7 +4169,9 @@ try {
         exit 10
     }
     [Console]::Error.WriteLine("The setup window stopped: $why")
+    try { Remove-DocumentCopies } catch { }
     if ($ReadySignal -and -not $script:Harness) { Start-TextInstallerFallback "The setup window stopped: $why" }
     exit 1
 }
+try { Remove-DocumentCopies } catch { }
 exit $exitCode

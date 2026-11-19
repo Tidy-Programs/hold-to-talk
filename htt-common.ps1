@@ -116,15 +116,55 @@ function Read-SourceFact([string]$Dir, [string]$File, [string]$Pattern, [string]
     return $Default
 }
 
-function Remove-PathWithRetry([string]$Path, [int]$Tries = 5) {
+function Test-IsLink([string]$Path) {
+    # $true when the path itself is a reparse point (a junction or a symbolic
+    # link): it points somewhere else, and is never followed when removing.
+    try {
+        $a = [IO.File]::GetAttributes($Path)
+        return [bool]($a -band [IO.FileAttributes]::ReparsePoint)
+    } catch { return $false }
+}
+
+function Remove-TreeNoFollow([string]$Path) {
+    # Removes a file or a folder tree WITHOUT following links. A reparse point
+    # (junction, symbolic link) is removed as the link itself and what it
+    # points to is left untouched. Windows PowerShell 5.1's Remove-Item -Recurse
+    # can walk into a junction, so the tree is walked here by hand. Throws on
+    # failure.
+    $attr = [IO.File]::GetAttributes($Path)
+    $isDir = [bool]($attr -band [IO.FileAttributes]::Directory)
+    $isLink = [bool]($attr -band [IO.FileAttributes]::ReparsePoint)
+    if (-not $isDir) {
+        [IO.File]::SetAttributes($Path, [IO.FileAttributes]::Normal)
+        [IO.File]::Delete($Path)
+        return
+    }
+    if (-not $isLink) {
+        # An ordinary folder (and, above, a file) with the ReadOnly attribute cannot be
+        # deleted until the attribute is cleared; the other attributes are kept.
+        if ($attr -band [IO.FileAttributes]::ReadOnly) {
+            [IO.File]::SetAttributes($Path, ($attr -band (-bnot [IO.FileAttributes]::ReadOnly)))
+        }
+        foreach ($e in @([IO.Directory]::GetFileSystemEntries($Path))) { Remove-TreeNoFollow $e }
+    } else {
+        try { [IO.File]::SetAttributes($Path, [IO.FileAttributes]::Directory) } catch { }
+    }
+    # Directory.Delete(path, false) on a junction removes the link, not its target.
+    [IO.Directory]::Delete($Path, $false)
+}
+
+function Remove-PathWithRetry([string]$Path, [int]$Tries = 5, [switch]$RefuseLink) {
     # Returns $true when the path is gone. A running program or a virus
-    # scanner can hold a file for a moment, hence the retries.
+    # scanner can hold a file for a moment, hence the retries. Links inside the
+    # tree are removed as links (never followed). With -RefuseLink, a path that
+    # is itself a link is not removed at all ($false).
+    if ($RefuseLink -and (Test-IsLink $Path)) { return $false }
     for ($i = 1; $i -le $Tries; $i++) {
-        if (-not (Test-Path -LiteralPath $Path)) { return $true }
-        try { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop }
+        if (-not (Test-Path -LiteralPath $Path) -and -not (Test-IsLink $Path)) { return $true }
+        try { Remove-TreeNoFollow $Path }
         catch { Start-Sleep -Milliseconds (300 * $i) }
     }
-    return -not (Test-Path -LiteralPath $Path)
+    return -not ((Test-Path -LiteralPath $Path) -or (Test-IsLink $Path))
 }
 
 function Get-HttRunKeys {

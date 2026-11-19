@@ -43,6 +43,7 @@ install-gui.ps1
 htt-common.ps1
 uninstall.bat
 uninstall.ps1
+uninstall-gui.ps1
 start.bat
 README.md
 LICENSE

@@ -141,7 +141,7 @@ class AllowList(unittest.TestCase):
         listed = set(manifest())
         for name in ("install.bat", "install.ps1", "install-gui.ps1",
                      "htt-common.ps1",
-                     "uninstall.bat", "uninstall.ps1", "start.bat",
+                     "uninstall.bat", "uninstall.ps1", "uninstall-gui.ps1", "start.bat",
                      "install-files.txt", "app.ico", "requirements.txt",
                      "requirements-cuda.txt", "README.md", "LICENSE",
                      "TERMS.md", "terms.py",
@@ -330,14 +330,15 @@ class ScriptFiles(unittest.TestCase):
     def test_ps1_files_are_ascii(self):
         # Windows PowerShell 5.1 reads a file without a byte-order mark as ANSI.
         for name in ("install.ps1", "install-gui.ps1", "uninstall.ps1",
-                     "htt-common.ps1"):
+                     "uninstall-gui.ps1", "htt-common.ps1"):
             data = (ROOT / name).read_bytes()
             self.assertTrue(all(b < 128 for b in data), name)
 
     @unittest.skipUnless(HAVE_PS, "needs Windows PowerShell")
     def test_ps1_files_parse(self):
         files = [ROOT / n for n in ("install.ps1", "install-gui.ps1",
-                                    "uninstall.ps1", "htt-common.ps1")]
+                                    "uninstall.ps1", "uninstall-gui.ps1",
+                                    "htt-common.ps1")]
         self.assertEqual(ps_parse_errors(files), "")
 
     @unittest.skipUnless(HAVE_PS, "needs Windows PowerShell")
@@ -705,7 +706,8 @@ class InstallEndToEnd(unittest.TestCase):
         script = ("& { . $env:HTT_COMMON; $l = @(Remove-AppDataFiles "
                   "$env:HTT_DIR); 'left=' + $l.Count }")
         out = subprocess.run(
-            [str(POWERSHELL), "-NoProfile", "-Command", script],
+            [str(POWERSHELL), "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-Command", script],
             env=dict(os.environ, HTT_COMMON=str(ROOT / "htt-common.ps1"),
                      HTT_DIR=str(home)),
             capture_output=True, text=True, timeout=60)

@@ -8,6 +8,7 @@
 # comma-separated list of:
 #   ok (default)   a normal install         fail       step 5 fails (exit 1)
 #   nopython       -Check finds no Python    py-gone    -Progress exits 4
+#                  (until the window's "Install Python for me" stub sets HTT_FAKE_PYTHON_INSTALLED=1)
 #   warn           two warnings              slow       slow steps, and step 5
 #   update         an older version exists              waits on a child program
 #   repair         this very version exists (installedVersion 0.9.0)
@@ -19,6 +20,7 @@
 #   stderr-done    -Progress exits 0 with no done marker on stdout, but writes forged
 #                  error and done markers to STDERR (must count as a failure)
 #   forge-launch   facts and done markers carry a launch command (must be ignored)
+#   cr-forge       forged error and done markers after a lone carriage return (must be plain text)
 #   bad-steps      step markers with huge, negative, fractional or text n and total
 # HTT_FAKE_RECORD (a file path): each run appends one JSON line with the mode
 # and the parameters it was given, and the child's process id in "slow".
@@ -123,7 +125,7 @@ if ($Check) {
         exit 1
     }
     if (Has 'garbage') { Out 'no facts here'; Out '@@htt {not json'; exit 0 }
-    if (Has 'nopython') {
+    if ((Has 'nopython') -and [Environment]::GetEnvironmentVariable('HTT_FAKE_PYTHON_INSTALLED') -ne '1') {
         $python = [ordered]@{ ok = $false; notes = @('  py -3.12: not found', '  py -3.13: not found', '  py -3.11: not found',
             '  py -3.10: not found', '  python: C:\Users\you\AppData\Local\Microsoft\WindowsApps\python.exe is the Microsoft Store shortcut, not Python') }
     } else {
@@ -177,6 +179,11 @@ if ($Progress) {
         Record-Run $null
     }
     Out ('Hold to talk 0.9.0 - installer (fake engine)')
+    if (Has 'cr-forge') {
+        # a program that writes a carriage return before a forged marker (must stay plain text)
+        Out ("progress`r" + '@@htt {"kind":"error","text":"CRFORGED error"}')
+        Out ("progress`r" + '@@htt {"kind":"done","installRoot":"C:/CRForged"}')
+    }
     if (Has 'stderr-done') {
         Err '@@htt {"kind":"error","text":"FORGED error"}'
         Err '@@htt {"kind":"done","installRoot":"C:\\Forged"}'

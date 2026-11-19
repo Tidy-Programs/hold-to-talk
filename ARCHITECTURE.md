@@ -581,7 +581,10 @@ on every run. Steps, in order:
    `python -I` that must report 64-bit, machine `AMD64`, 3.10 to 3.13, with
    `tkinter` and `venv`. The Microsoft Store shortcut is refused.
 2. **Files.** It copies exactly the files named in `install-files.txt` (an
-   allow-list: a source folder may hold personal files), unblocks them, and
+   allow-list: a source folder may hold personal files; `Test-ManifestEntry`
+   refuses an entry that is rooted, has a drive letter or a colon, contains `..`,
+   a quote character or a brace, and `Install-Files` checks again that each target
+   is inside the install folder), unblocks them, and
    removes files with the extensions `.py .bat .ps1 .ico .md .txt .html .css
    .js` that an older version installed and the list no longer names.
 3. **The running app** is asked to quit (`dictate.py --quit`), never killed.
@@ -661,7 +664,16 @@ What the window does with that output is deliberately little, because pip
 and the model download write to the same pipes as the engine:
 
 - A marker is believed only on standard output; a line on standard error is
-  text, whatever it starts with.
+  text, whatever it starts with. Only a line feed ends a line (the window reads
+  the pipes with its own `HttLfReader`, not `StreamReader.ReadLine`, which also
+  ends a line at a lone carriage return): a line that holds a lone carriage
+  return, such as `progress<CR>@@htt {...}`, is split there by `Receive-RawLine`
+  and its pieces are log text only, so a program cannot forge a marker with it.
+  A line longer than the reader's buffer limit (1 000 000 characters) is cut
+  there; the cut piece and the next line the reader returns (which may be the tail
+  of the same long line) are flagged `Untrusted` by the reader and never taken as
+  markers (`Invoke-EngineTick` passes `Trusted` only for standard output and a
+  line that is not flagged).
 - A marker is never run or evaluated. It is parsed as JSON, and its fields
   are shown as plain text. A step marker outside the list of steps from the
   facts is ignored.
@@ -704,7 +716,12 @@ a picture of every page from canned facts with made-up paths) and `-AutoRun`
 (drives the window without a person). `-AutoRun` ticks the terms box by
 itself, so it refuses to run unless all five test overrides (`-InstallRoot
 -EnvDir -StartMenuDir -DesktopDir -RegKey`) are given, the four folders are
-inside the temp folder and the key is under `Software\HoldToTalkTest\`: a
+inside the temp folder and the key is under `Software\HoldToTalkTest\`, and the
+environment does not lead out of the temp folder either: `HOLDTOTALK_HOME` (the
+data folder, where the uninstaller deletes files and the install writes the
+record of the Terms) and the other variables `Get-HttLayout` reads for a path
+(`HTT_INSTALL_ROOT`, `HTT_ENV_DIR`, `HTT_START_MENU_DIR`, `HTT_DESKTOP_DIR`) must
+be unset or inside the temp folder (`Get-SandboxProblem`, in both windows): a
 test can never install for real or record a real acceptance. `-Engine` is
 honoured only under the same conditions (or in `-SelfTest` and `-Shots`).
 When a test checks that a script parses, the file names go to PowerShell in
@@ -714,10 +731,215 @@ the command, so a script named there would be run. Pictures of the
 real window show folder paths that contain the Windows account name; do not
 publish one, use `-Shots`.
 
+**Install Python for me.** When the facts say there is no suitable Python, the
+third page offers, besides "Open python.org" and "Check again", a primary button
+"Install Python for me". The panel is short on purpose: a plain lead ("Python is
+a free program that Hold to talk needs. Choose the button and Setup downloads it
+from python.org (about 27 MB) and installs it for your Windows account only.
+Nothing is downloaded until you choose the button."), the three buttons directly
+under it (visible without scrolling at 780x580 and at 880x470), and a collapsed
+"Details" expander. The details say what is downloaded (the official Python
+3.12.10 installer, 64-bit), that it is checked against a fixed fingerprint and the
+Python Software Foundation's signature, what is installed (Python 3.12.10 for this
+Windows account only, with the "py" launcher) and what is not (no administrator
+rights, python.exe is not added to PATH, no file associations, no Start menu
+shortcuts; the launcher may add its own folder to PATH), that a PC with an ARM
+processor still takes the 64-bit installer, and that Python has its own licence
+(the PSF License). They also hold the "install it yourself" steps and what the
+check looked at. Nothing is downloaded before the click. One file is
+pinned in `$script:PyPin`: the exact address
+`https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe`,
+its size (26 964 224 bytes) and its SHA-256. 3.12.10 is the newest 3.12 release
+with a Windows installer (later 3.12 releases are source-only). The window
+downloads it with `HttpClient` over TLS 1.2 or newer (redirects are refused, the
+length must equal the pinned size) in a state machine advanced by its timer (so
+it never waits on the network; Cancel stops it and deletes the partial file) into a
+folder made fresh for the run (`htt-py-<guid>` in the temp folder, this account
+only, created new by `New-PrivateTempDir`; if its access rights cannot be set the
+run stops with a plain error). When the download ends the file is opened at once
+with `FileAccess.Read` and `FileShare.Read` and stays open until the installer
+process has been started, so it cannot be replaced or renamed in between;
+`Test-PythonInstaller` takes the size and the SHA-256 from that open handle and
+also requires `Get-AuthenticodeSignature` status `Valid` with a signer subject
+containing "Python Software Foundation"; if either fails the file is deleted, a
+plain error is shown and nothing runs. It then runs
+`/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1
+InstallLauncherAllUsers=0 Include_tcltk=1 Include_test=0 SimpleInstall=1
+AssociateFiles=0 Shortcuts=0` (option names from
+docs.python.org/3.12/using/windows.html, "Installing Without UI"), waits for
+it, treats exit code 0 and 3010 (Windows Installer: done, a restart may be needed
+later; the panel says so) as success and any other code as a failure, deletes the
+folder in every case, refreshes its own `PATH` and `HTT_PYTHON` for the child
+process (the launcher's installation changes the user's PATH, which a running
+window does not see) and runs "Check again". After 15 minutes
+(`$script:PyTimeoutSeconds`) the panel says the installer is taking a long time and
+shows "Stop waiting"; it, and closing the window while the installer runs, ask
+"Stop waiting for Python?" (Stop waiting / Keep waiting), and on yes
+`Stop-PythonInstallWait` ends only the process object this window started, cleans
+up and shows the manual route. In test mode (the five overrides, or any harness)
+the button calls `Invoke-PythonInstallStub`, which only records the call and sets
+`HTT_FAKE_PYTHON_INSTALLED`, so the fake engine's "nopython" scenario then finds
+Python; the real download and run refuse in test mode unless the self-test injects
+a local source and a fake installer (`$script:PyOpen`, `$script:PyRun`).
+`install.ps1` itself is unchanged by this.
+
+### The Setup.exe
+
+`HoldToTalk-Setup-<version>.exe` is one file for people who do not want a ZIP.
+It is only a carrier (Inno Setup 6, `installer\holdtotalk.iss`); it installs,
+registers and uninstalls nothing itself. `CreateAppDir=no`, `Uninstallable=no`,
+`CreateUninstallRegKey=no` and `PrivilegesRequired=lowest` mean it has no
+install folder, no Start menu group, no uninstaller and no entry in Installed
+apps, and never asks for administrator rights; every Inno page is skipped.
+`install.ps1` does all of that, exactly as for the ZIP route, which is unchanged.
+
+What it does: `InitializeSetup` unpacks the files named in `install-files.txt`
+plus `files.sha256` into `{tmp}\app` (Inno's private temporary folder; the
+files are `dontcopy` entries extracted one by one and moved into their folders
+by a generated `PlaceFiles`), then runs `{sys}\WindowsPowerShell\v1.0\
+powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden
+-File {tmp}\app\install-gui.ps1` started with `SW_HIDE` (no console window; the
+WPF window still shows) and waits. So the setup window, and through it
+`install.ps1`, run from the unpacked folder, which exists until the exe ends.
+Setup then exits with the window's exit code (0, 1, 2, 3): under `/SILENT` and
+`/VERYSILENT` through `GetCustomSetupExitCode` and Inno's normal clean-up; when
+run by a person, Inno would show a wizard page, so it calls `ExitProcess`
+instead and a hidden PowerShell removes the temporary folder a moment later. That
+child runs a small script (`CLEANUP_SCRIPT` in `tools\build_setup.py`, written by
+the exe to a file of its own in the temp folder and started with `-File`, which
+deletes itself): the folder's name reaches it in the environment variable
+`HTT_CLEAN_TARGET`, never through `cmd` (where a `%` would be expanded) or in a
+command text; it removes only a folder named `is-<letters and digits>.tmp` directly
+in the temp folder, retrying for up to 30 seconds. Inno may hand over `{tmp}` in its
+8.3 short form, so the folder's parent and the temp folder are both turned into long
+names (`GetLongPathNameW`) before they are compared. A target that is itself a
+reparse point (attribute 1024) is refused, and the contents are deleted by the same
+no-follow walk as `Remove-TreeNoFollow` (inlined: the script cannot dot-source
+`htt-common.ps1`), so a junction inside is removed as the link and what it points to
+survives; ReadOnly is cleared on the way. If
+PowerShell or the script is missing, the process cannot start, or the window
+process ends with a code outside 0 to 3 (it could not even show itself), one plain
+message box says the setup window could not be opened on this PC and that the app
+can also be installed from the ZIP on the project's page with `install.bat`, and
+the exit code is 1 (no box when `WizardSilent`, that is under `/SILENT` and
+`/VERYSILENT`).
+
+The window is started with `-FromSetupExe`. In that route its folder is Setup's
+private temporary folder, which is deleted when the exe ends, so the window never
+offers or starts the text installer (the "Use the text installer instead" button
+is hidden, `Open-TextInstaller` and `Start-TextInstallerFallback` do nothing) and
+its messages about a missing or wrong file say "Download it again from the
+project's page, or download the ZIP there and run install.bat" instead of "Extract
+the whole ZIP" (`Get-DownloadAdvice`). Where the window itself tells a person to
+try again it says "run Setup again" instead of "run install.bat again"
+(`Get-RunAgainName`); a warning or error that comes from the engine and names
+`install.bat` gets one more line, "(If you used the Setup file: run Setup again.)"
+(`Add-SetupExeHint`). A document opened in Notepad (the Terms,
+LICENSE, ...) is opened from a copy in a private folder of its own
+(`htt-doc-<guid>` in the temp folder, `Get-DocumentPath`), so Notepad never holds
+a file of the folder Setup deletes; the window deletes that copy on exit
+(`Remove-DocumentCopies`) when it can.
+
+Tamper check. `tools\build_setup.py` writes `files.sha256` (first line `#
+htt-sha256 1`, then `<lowercase sha256>  <path/with/forward/slashes>` for each
+file of `install-files.txt`). When that file is next to `install.ps1`,
+`Test-DownloadIntact` runs at the start of an install and of `-Check`, before
+anything is read or changed: every listed file must exist and match, every file
+of `install-files.txt` must be listed, and no other entry may exist; otherwise
+it stops with "This download is damaged or was changed. Download it again from
+the project's page." and exit code 1 (plus an error marker in machine mode).
+With no `files.sha256` (the ZIP route, a checkout) nothing is checked or
+printed. The file is not in `install-files.txt` and is never copied into the
+install folder. It guards against a damaged or partly replaced download; it is
+not a signature (whoever can rewrite the exe can rewrite both).
+
+Build: `python -B tools\build_setup.py --iscc <path to ISCC.exe>` (or set
+`HTT_ISCC`; `--out` changes `dist\`). It copies exactly the files of
+`install-files.txt` into a staging folder with a neutral name
+(`C:\htt-build-<random>`, never under the user profile), writes `files.sha256`
+and the generated include files there (`files.inc`, `place.inc`, `cleanup.inc`)
+and gives every staged file the same modification time (2026-01-01 00:00:00 UTC;
+the script has `TimeStampsInUTC=yes`), so the build machine's clock and time zone
+are not recorded. Entries of `install-files.txt` that are rooted, have a drive
+letter or a colon, contain `..`, a quote or a brace are refused (and by
+`install.ps1`, `Test-ManifestEntry`). git is always called with
+`--literal-pathspecs`, so `[`, `*` or `?` in a name is never a pattern. Then, BEFORE compiling, `staging_scan`
+searches every staged file, `files.sha256`, the generated `.inc` files and the
+`.iss` for the Windows account name, the profile folder's name, the computer name
+and the domain name (a value shorter than 3 characters, equal to a generic word
+such as "user", "admin" or "pc", or empty is skipped, and the build says which were
+skipped; it never prints a value) and for `C:\Users\` followed by anything other
+than exactly `you` (the name must be followed by a path separator, a quote, white
+space or the end: `you.x`, `youth` and `you_1` are hits), as UTF-8, as the ANSI code page and as UTF-16LE, ignoring case; any hit
+stops the build before anything is compiled. The compiled exe is LZMA-compressed,
+so it is searched afterwards only as a second, clearly labelled "loader only"
+check (the staging path and the same values). The build then removes the staging
+folder and writes the exe and `SHA256SUMS.txt` to `dist\` (ignored by git). It
+refuses to build when files of `install-files.txt` have uncommitted changes,
+are untracked, or are not tracked by git unless `--allow-dirty` is given (and then
+says so loudly); a listed file that git ignores is refused even then. Version,
+name and publisher ("Hold to talk contributors") in the exe's version resource
+come from `settings.py` and the script; there are no URLs or personal names in it.
+
+Test pass-through: `/HTTARGS="<arguments>"` is appended after `-File
+install-gui.ps1`, so a test can add `-AutoRun <scenario>` and the five test
+overrides (`tests/test_setup_exe.py`; paths cannot contain quotes or spaces).
+It is safe because the arguments are the script's own, never PowerShell
+switches, and `install-gui.ps1` refuses `-AutoRun` (which ticks the terms box
+itself) unless all five overrides point into the temp folder and a key under
+`Software\HoldToTalkTest\`: it cannot be used for a silent real install.
+
+`tests/test_installer_hardening.py` proves the link and file-handling rules by running
+them in a temporary folder: a real junction (`mklink /J`) that the no-follow removal and
+both delayed-cleanup scripts must not follow, a read-only folder in the tree, an 8.3
+short-form target, `HttLfReader` compiled under Windows PowerShell 5.1, and a program
+held open with `FileShare.Read` (as the Python path holds the installer) that still
+starts while a write to it fails.
+
+### The uninstaller window
+
+`uninstall.bat` with no arguments opens `uninstall-gui.ps1`, in the same style
+as the setup window (the palette, fonts and styles are copied into it, not shared).
+It never removes anything itself: like the setup window it runs `uninstall.ps1`
+as a hidden child process. `uninstall.ps1 -Check` changes nothing and prints one
+`facts` marker (folders, version, whether there is data, the model cache, the step
+titles); `uninstall.ps1 -Progress -DeleteUserData yes|no` removes without ever
+reading input and prints `step`, `warning`, `error` and `done` markers
+(`@@htt ` and one line of JSON, believed from standard output only). The answer
+is required, never assumed; `-DeleteData` stays the switch of the text mode and is
+refused with `-Progress`. In this mode the engine also removes `uninstall.bat` and
+the program folder itself when `-BatDir` is that folder (the batch file has
+finished: it only opened the window) and exits 0. The pages are: "Remove Hold to
+talk?" (what will be removed and kept), the progress, and the result (removed, with
+what is left on purpose; or a failure with "Copy details"). The box "Also delete my
+settings, dictation history and logs (this cannot be undone)" (unticked) sits in a
+row of its own under the scrolling part of the first page, never over it, with the
+line "Your settings, history and logs are kept unless you tick this box." above it,
+so the choice and what is kept are seen without scrolling. When data was deleted
+but files the app did not make were left, the result says "These were not made by
+the app, so they were not deleted: <names>." and "They are in:" with the folder. An
+error shown before anything was removed (the check failed) marks step 1, Confirm,
+as the failed step in the rail. Ticking
+the box shows "Delete your settings and history for good?" (Delete / Keep; Esc is
+Keep); the engine gets `-DeleteUserData yes` only for a ticked and confirmed box.
+There is no Cancel or Close while files are being removed. Exit codes of the window:
+0 removed, 1 failed, 3 closed before removing. For tests it takes `-SelfTest`,
+`-Shots <folder>`, `-Engine <path>` (`tests/fixtures/fake_uninstall_engine.ps1`)
+and `-AutoRun remove|remove-data|remove-keep|cancel`, with the same sandbox rule as
+the setup window (five overrides, folders under the temp folder, key under
+`Software\HoldToTalkTest\`); only `Set-DataBoxForTest` may tick the box by program, and
+it refuses outside that sandbox.
+
 `uninstall.bat` makes `htt-uninstall-<random>` in the temp folder (failing if
 it exists), restricts it to this account with `icacls` (the same protection as
-`Get-WorkDir`), copies `uninstall.ps1` and `htt-common.ps1` into it and runs
-them from there, so the install folder can be deleted. If the folder cannot be
+`Get-WorkDir`), copies `uninstall.ps1` and `htt-common.ps1` (and, when they are
+there, `uninstall-gui.ps1` and `app.ico`) into it and runs them from there, so the
+install folder can be deleted. With no arguments it runs
+`uninstall-gui.ps1 -Launch` from that copy (the launcher starts the window without a
+console, as for the setup window; the window deletes the copy when it ends, only a
+folder named `htt-uninstall-<digits>` directly in the temp folder), and when the
+window cannot be shown it prints one line and goes on with the text uninstaller; with
+any argument it runs the text uninstaller. If the folder cannot be
 made private, nothing runs. `uninstall.ps1` asks the app to quit, runs
 `dictate.py --uninstall` (the Start with Windows entry) and then removes the
 `Run` and `StartupApproved` values directly, removes the shortcuts and the
@@ -726,7 +948,21 @@ Installed apps key, the environment and the `window`, `window-*` and
 `data` (`Remove-AppDataFiles`, by name only), empties the program folder, and
 exits 10 so `uninstall.bat` deletes itself (exit codes: 0 done, 10 done and
 delete the batch file, 2 cancelled, 1 failed). It never touches the model cache,
-pip's cache or Ollama; it prints where they are.
+pip's cache or Ollama; it prints where they are. It never follows a link out of
+the tree it removes: a folder to remove that is itself a reparse point (a junction
+or symbolic link: the environment, a `window*` folder, the program folder) is
+refused with a warning and left alone (`Test-IsLink`), and a link inside it is
+removed as the link, not followed (`Remove-TreeNoFollow` in `htt-common.ps1`, used
+by `Remove-PathWithRetry`, because Windows PowerShell 5.1's `Remove-Item -Recurse`
+can walk into a junction). The window's own temporary copy (`Remove-OwnTempCopy`) is removed by the same no-follow
+walk (`Remove-OwnTree`, inlined because the window does not load `htt-common.ps1`)
+and never when the copy is itself a link; when something still holds it, a hidden
+PowerShell (`Get-DelayedCleanupScript`) gets the folder in an environment variable
+(not through `cmd`) and removes only `htt-uninstall-<digits>` directly in the temp
+folder, with the same checks as the Setup.exe's script (long names, a link target
+refused, no recursive delete that could follow a link). `Remove-TreeNoFollow` clears
+the ReadOnly attribute of ordinary folders and files before deleting them, so a
+read-only folder cannot make the removal fail.
 
 **Test overrides** (`htt-common.ps1`): `-InstallRoot`, `-EnvDir`,
 `-StartMenuDir`, `-DesktopDir`, `-RegKey` (or `HTT_INSTALL_ROOT`,

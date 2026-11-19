@@ -1,7 +1,9 @@
 @echo off
-rem Uninstalls Hold to talk (runs uninstall.ps1 from a temporary copy so the
-rem install folder can be deleted). Safe to double-click; it asks first and
-rem keeps your settings and history unless you say otherwise.
+rem Uninstalls Hold to talk (runs from a temporary copy so the install folder
+rem can be deleted). Safe to double-click. With no arguments it opens the
+rem uninstaller window (uninstall-gui.ps1), which asks first and keeps your
+rem settings and history unless you tick the box; with any argument it runs the
+rem text uninstaller, uninstall.ps1, which gets the arguments (-Yes, -DeleteData).
 setlocal
 title Uninstall Hold to talk
 set "HERE=%~dp0"
@@ -22,6 +24,22 @@ copy /y "%HERE%uninstall.ps1" "%TMPD%\" >nul
 if errorlevel 1 goto :nocopy
 copy /y "%HERE%htt-common.ps1" "%TMPD%\" >nul
 if errorlevel 1 goto :nocopy
+rem The window and its icon go along when they are there (the text uninstaller
+rem does not need them).
+if exist "%HERE%uninstall-gui.ps1" copy /y "%HERE%uninstall-gui.ps1" "%TMPD%\" >nul
+if exist "%HERE%app.ico" copy /y "%HERE%app.ico" "%TMPD%\" >nul
+if not "%~1"=="" goto :text
+if not exist "%TMPD%\uninstall-gui.ps1" (
+    echo The uninstaller window ^(uninstall-gui.ps1^) is missing. Using the text uninstaller instead.
+    goto :text
+)
+rem uninstall-gui.ps1 -Launch starts the window without a console window and
+rem returns 0 once it is up (this console then closes; the window removes the
+rem temporary copy when it ends), or 1 after printing why it could not be shown
+rem (then the text uninstaller runs here).
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%TMPD%\uninstall-gui.ps1" -Launch -BatDir "%HERE%."
+if "%errorlevel%"=="0" exit /b 0
+:text
 "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%TMPD%\uninstall.ps1" -BatDir "%HERE%." %*
 set "RC=%errorlevel%"
 rd /s /q "%TMPD%" >nul 2>&1

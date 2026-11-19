@@ -89,10 +89,21 @@ The first release. What it contains, by area:
   with the seven steps ticked off, a progress bar and the full text behind
   "Show details"; and Finish, with how to open the app and "Start Hold to
   talk now". Nothing is changed before you choose Install. If Python is
-  missing the window says so, opens python.org for you and checks again
-  without starting over; if the install fails it says why and offers Try
+  missing the window says so, offers to install it (see below) or opens
+  python.org for you, and checks again without starting over; if the install fails it says why and offers Try
   again. The window needs only what Windows already has, so it works before
   Python is installed.
+- A single Setup file, `HoldToTalk-Setup-0.9.0.exe`, on the Releases page:
+  it unpacks the app's files to a temporary folder and opens the setup
+  window, with no console window and no administrator rights. It checks
+  every file against a list of fingerprints and refuses a damaged or changed
+  download. It is not digitally signed. The ZIP with `install.bat` remains.
+- If Python is missing, the setup window can install it: it downloads the
+  official Python 3.12.10 installer from python.org and runs it only when
+  its fingerprint and the Python Software Foundation's signature both check
+  out, for the Windows account only.
+- Uninstalling opens a window in the same style. Deleting your settings and
+  history needs a box that starts unticked and a confirmation.
 - When the app is already installed, the same window is the updater and
   says so: it is named "Update", says that it updates the installed version
   and does not install a second copy, and its button, headings and result
