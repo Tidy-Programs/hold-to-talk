@@ -4,8 +4,9 @@
 # each package lists the sha256 of its Windows 64-bit wheels for Python 3.10 - 3.13.
 # ranges-sha256: 01a8d05bad4852be6c172f40ea489942759359766facefe3333587d67d29e1b7
 
-nvidia-cublas-cu12==12.9.2.10 \
-    --hash=sha256:623f43027d40d44ceadf0043f002bd25cf353e8f13ce90b9a87057019f560661
+nvidia-cublas-cu12==12.9.3.13 \
+    --hash=sha256:918a8781956115d34b1db49e0e7b7befba8d101661c4b560ed4d42e0e17bebc3 \
+    --hash=sha256:d7d51055f161b317c7105ddaae90e71eda059026074ffef93cf7cde2886bfe72
 nvidia-cuda-nvrtc-cu12==12.9.86 \
     --hash=sha256:72972ebdcf504d69462d3bcd67e7b81edd25d0fb85a2c46d3ea3517666636349
 nvidia-cudnn-cu12==9.28.1.4 \
