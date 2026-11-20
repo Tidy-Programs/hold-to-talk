@@ -603,8 +603,17 @@ function stateWords() {
   if (!l) return { key: 'loading', title: 'Connecting…', sub: '', short: 'Connecting…' };
   if (l.terms?.pending) return { key: 'paused', title: 'Off until you accept the terms', short: 'Terms not accepted',
     sub: 'Dictation stays off, and your hold-to-talk key does nothing, until you read and accept the Terms of Use.' };
+  if (l.status === 'loading' && l.download) {
+    const pct = Number.isInteger(l.download.percent) ? ' ' + l.download.percent + '%' : '';
+    return { key: 'loading', title: 'Downloading the speech model' + pct, short: 'Downloading…' + pct,
+      sub: 'Downloading the speech model' + (l.download.size ? ' (' + l.download.size + ')' : '') + '… this can take several minutes. It is downloaded only once; after that it works offline.' };
+  }
   if (l.status === 'loading') return { key: 'loading', title: 'Getting ready', short: 'Getting ready…',
     sub: 'Loading the speech model. This takes a few seconds, longer the very first time.' };
+  if (l.status === 'failed' && l.failure) return { key: 'failed', title: 'Can’t dictate right now', short: 'Can’t dictate',
+    // The plain reason and what to do; the technical detail is in the log.
+    sub: (l.detail || 'The speech model could not be downloaded.') + ' ' + (l.failure.advice || '') + (l.failure.auto_retry
+      ? ' Hold to talk will try again by itself, or choose Try again.' : ' Choose Try again.') };
   if (l.status === 'failed') return { key: 'failed', title: 'Can’t dictate right now', short: 'Can’t dictate',
     sub: speechFailure(l.detail) };
   if (l.capturing) return { key: 'working', title: 'Waiting for a key', short: 'Waiting for a key',
@@ -940,7 +949,7 @@ views.home = {
     } else {
       // Which model is used depends on the hardware found while loading.
       speechName = 'Choosing a model…';
-      speechHow = [h('span', { class: 'dot loading' }), 'Getting ready'];
+      speechHow = [h('span', { class: 'dot loading' }), S.live?.download ? 'Downloading' : 'Getting ready'];
     }
     const [cw, ck] = cl.enabled ? cleanupWords(hl.cleanup?.state, hl.cleanup?.blocked, hl.cleanup) : ['Off', ''];
     put(this.engines,
@@ -1815,7 +1824,7 @@ views.settings = {
       settingRow('Learn clear-cut fixes automatically', 'When you only change how a word is written (github → GitHub), learn it without asking. Everything else is still offered for you to accept.', toggle('auto_learn', 'Learn clear-cut fixes automatically')));
 
     // sounds
-    const snd = s.sounds || { enabled: true, volume: 0.5 };
+    const snd = s.sounds || { enabled: true, volume: 0.5, mute_others: false };
     const volStatus = h('span', { class: 'saved', 'aria-live': 'polite' });
     const vol = h('input', { type: 'range', min: '0', max: '100', step: '5', value: String(Math.round(snd.volume * 100)), 'aria-label': 'Chime volume', class: 'range', disabled: !snd.enabled });
     const volText = h('span', { class: 'small muted vol', text: Math.round(snd.volume * 100) + '%' });
@@ -1831,11 +1840,13 @@ views.settings = {
     };
     const [soundSwitch, soundStatus] = toggle('sounds', 'Play chimes', st => st.sounds?.enabled, v => ({ sounds: { enabled: v } }),
       on => { vol.disabled = !on; });
+    const [muteSwitch, muteStatus] = toggle('mute_others', 'Mute other sound while dictating', st => st.sounds?.mute_others, v => ({ sounds: { mute_others: v } }));
     const sounds = group('sounds', 'Sounds', null,
       settingRow('Start and stop chimes', 'A short sound when dictation starts listening and when it stops.', [soundSwitch, soundStatus]),
       settingRow('Volume', null, [vol, volText, volStatus]),
       settingRow('Hear them', null, [h('button', { class: 'btn', type: 'button', text: 'Play start', onclick: play('start') }),
-        h('button', { class: 'btn', type: 'button', text: 'Play stop', onclick: play('stop') }), playNote]));
+        h('button', { class: 'btn', type: 'button', text: 'Play stop', onclick: play('stop') }), playNote]),
+      settingRow('Mute other sound while dictating', 'While you hold the key, other programs go silent, and come back when you let go. People in a call can still hear you; you will not hear them.', [muteSwitch, muteStatus]));
 
     // appearance
     const appearance = this.appearance();

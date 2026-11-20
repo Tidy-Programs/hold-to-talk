@@ -11,7 +11,7 @@
 #                  (until the window's "Install Python for me" stub sets HTT_FAKE_PYTHON_INSTALLED=1)
 #   warn           two warnings              slow       slow steps, and step 5
 #   update         an older version exists              waits on a child program
-#   repair         this very version exists (installedVersion 0.9.0)
+#   repair         this very version exists (installedVersion 0.9.1)
 #   gpu            an NVIDIA card is found   gpu-ready  ...with the runtime in place
 #   model-present  the model is on the PC    deps-current  libraries up to date
 #   lowdisk        little free space         crash      exit 1 with no error marker
@@ -116,7 +116,7 @@ if ($Gpu -eq 'no') { $gpuFound = $false }
 if ($Check) {
     Record-Run $null
     if ($Yes -or $Progress) { Out 'The installer stopped:'; Out '-Check cannot be combined with that.'; exit 1 }
-    Out 'Hold to talk 0.9.0 - checking this PC (fake engine)'
+    Out 'Hold to talk 0.9.1 - checking this PC (fake engine)'
     Pause-A 150
     Err 'a line on standard error'
     if (Has 'check-fail') {
@@ -133,13 +133,13 @@ if ($Check) {
     }
     $installed = $null
     if (Has 'update') { $installed = '0.8.2' }
-    if (Has 'repair') { $installed = '0.9.0' }
+    if (Has 'repair') { $installed = '0.9.1' }
     $present = $null
     if (Has 'model-present') { $present = $true } elseif (Has 'update') { $present = $false }
     $free = [int64]182 * 1GB
     if (Has 'lowdisk') { $free = [int64]900 * 1MB }
     $facts = [ordered]@{
-        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.0'; termsVersion = $TermsVersion
+        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.1'; termsVersion = $TermsVersion
         testMode = $testMode; layout = $layout; installedVersion = $installed; python = $python
         gpu = [ordered]@{ found = $gpuFound; runtimeInstalled = [bool](Has 'gpu-ready') }
         env = [ordered]@{ exists = [bool]((Has 'update') -or (Has 'repair') -or (Has 'deps-current')); depsCurrent = [bool](Has 'deps-current') }
@@ -178,7 +178,7 @@ if ($Progress) {
     } else {
         Record-Run $null
     }
-    Out ('Hold to talk 0.9.0 - installer (fake engine)')
+    Out ('Hold to talk 0.9.1 - installer (fake engine)')
     if (Has 'cr-forge') {
         # a program that writes a carriage return before a forged marker (must stay plain text)
         Out ("progress`r" + '@@htt {"kind":"error","text":"CRFORGED error"}')
@@ -255,7 +255,7 @@ if ($Progress) {
     if ($DesktopShortcut -eq 'yes') { $desk = $layout.desktopLnk }
     Marker ([ordered]@{ kind = 'done'; installRoot = $InstallRoot; envDir = $EnvDir; dataDir = $dataDir
         startMenuLnk = $layout.startMenuLnk; desktopLnk = $desk; termsRecorded = $true; launch = $(if (Has 'forge-launch') { $forged } else { $launch }) })
-    Out 'Done. Hold to talk 0.9.0 is installed.'
+    Out 'Done. Hold to talk 0.9.1 is installed.'
     exit 0
 }
 

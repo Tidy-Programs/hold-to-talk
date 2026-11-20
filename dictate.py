@@ -602,6 +602,8 @@ def run_app(args, windowless, log_path, history_path=None, test=False):
     handle = server = window = None
     stop_listening = lambda: None   # noqa: E731
 
+    told = {"download": False}
+
     def on_status(status, detail):
         if status == "ready":
             log.info("Ready (speech model loaded in %s). Hold %s and speak; "
@@ -611,12 +613,23 @@ def run_app(args, windowless, log_path, history_path=None, test=False):
             # Stay running: the window shows what went wrong and the tray
             # can still quit. A message box says so when there is no console.
             log.error("Speech model failed to load: %s", detail)
+            if app.failure is not None:
+                # A failed download is tried again by itself every few
+                # seconds or minutes: say it once, not on every attempt.
+                if told["download"]:
+                    return
+                told["download"] = True
+                text = (f"{detail}\n\n{app.failure['advice']} Hold to talk "
+                        "will try again by itself; you can also open its "
+                        "window from the tray icon and choose Try again.")
+            else:
+                text = ("The speech model could not be loaded, so dictation "
+                        f"cannot work:\n\n{detail}\n\nOpen the app window "
+                        "from the tray icon for details.")
             if windowless:
-                threading.Thread(target=message_box, args=(
-                    "The speech model could not be loaded, so dictation "
-                    f"cannot work:\n\n{detail}\n\nOpen the app window from "
-                    "the tray icon for details.",), kwargs={"error": True},
-                    daemon=True).start()
+                threading.Thread(target=message_box, args=(text,),
+                                 kwargs={"error": True},
+                                 daemon=True).start()
 
     try:
         server = api.Server(app, history, port=args.ui_port or 0,
@@ -632,6 +645,7 @@ def run_app(args, windowless, log_path, history_path=None, test=False):
         app.on_status.append(on_status)
         app.on_reload.append(cleanup_reload_hook(app))
         log.info("Loading the speech model (this can take a while)...")
+        app.progress_source = stt.download_progress
         app.load_engine(lambda: stt.Engine(app.cfg))
         cleanup.prepare_in_background(lambda: app.cfg)
         stop_listening = _listen(app, window.open_async, suffix)

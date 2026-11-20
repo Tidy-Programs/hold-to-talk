@@ -20,6 +20,7 @@ from unittest import mock
 
 import numpy as np
 
+import fakes
 import stt
 
 CFG = {"model": "big-model", "cpu_model": "small-model", "device": "auto",
@@ -46,30 +47,44 @@ class FakeModel:
 
 
 class World:
-    """Fake faster_whisper + ctranslate2 modules and their behaviour."""
+    """Fake faster_whisper + ctranslate2 modules and their behaviour. The
+    model "files" live in a temporary Hugging Face cache (HF_HUB_CACHE points
+    there while an engine loads): nothing real is downloaded or read."""
 
     def __init__(self, gpus=1, supported=("float16", "int8_float16", "int8"),
                  cached=True, gpu_error=None):
         self.gpus, self.supported = gpus, set(supported)
         self.cached, self.gpu_error = cached, gpu_error
-        self.loads = []                  # (name, device, compute, local_only)
+        self.cache = Path(tempfile.mkdtemp(prefix="htt-test-hfcache-"))
+        atexit.register(shutil.rmtree, self.cache, True)
+        self.loads = []                  # (name, device, compute)
+        self.downloads = []              # (name, local_files_only)
         self.ct_calls = []
         self.model = FakeModel()
         self.runtime = True              # the NVIDIA runtime is installed
-        self.kwargs = []                 # extra keywords of each load
+        self.kwargs = []                 # extra keywords of each download
+        self.folders = {}                # path -> model name
         world = self
 
+        def download_model(name, local_files_only=False, **kw):
+            world.downloads.append((name, local_files_only))
+            world.kwargs.append(kw)
+            if local_files_only and not world.cached:
+                raise FileNotFoundError("Cannot find an appropriate "
+                                        "cached snapshot folder ... "
+                                        "outgoing traffic has been "
+                                        "disabled")
+            folder = fakes.make_model_folder(world.cache, name,
+                                             kw.get("revision"))
+            world.cached = True          # "downloaded"
+            world.folders[str(folder)] = name
+            return str(folder)
+
         class WhisperModel:
-            def __new__(cls, name, device="auto", compute_type="default",
-                        local_files_only=False, **kw):
-                world.loads.append((name, device, compute_type,
-                                    local_files_only))
-                world.kwargs.append(kw)
-                if local_files_only and not world.cached:
-                    raise FileNotFoundError("Cannot find an appropriate "
-                                            "cached snapshot folder ... "
-                                            "outgoing traffic has been "
-                                            "disabled")
+            def __new__(cls, path, device="auto", compute_type="default",
+                        **kw):
+                world.loads.append((world.folders.get(str(path), path),
+                                    device, compute_type))
                 if device == "cuda" and world.gpu_error:
                     raise world.gpu_error
                 return world.model
@@ -83,15 +98,15 @@ class World:
             return world.supported
 
         self.modules = {
-            "faster_whisper": types.SimpleNamespace(WhisperModel=WhisperModel),
+            "faster_whisper": types.SimpleNamespace(
+                WhisperModel=WhisperModel, download_model=download_model),
             "ctranslate2": types.SimpleNamespace(
                 get_cuda_device_count=count,
                 get_supported_compute_types=types_)}
 
     def engine(self, **cfg):
-        with mock.patch.dict(sys.modules, self.modules), \
-                mock.patch.object(stt, "add_cuda_dll_dirs", return_value=[]), \
-                mock.patch.object(stt, "cuda_runtime_installed",
+        with mock.patch.dict(sys.modules, self.modules),                 mock.patch.dict(os.environ,
+                                {"HF_HUB_CACHE": str(self.cache)}),                 mock.patch.object(stt, "add_cuda_dll_dirs", return_value=[]),                 mock.patch.object(stt, "cuda_runtime_installed",
                                   return_value=self.runtime):
             return stt.Engine(dict(CFG, **cfg))
 
@@ -100,7 +115,8 @@ class Loading(unittest.TestCase):
     def test_a_cached_model_is_loaded_without_the_network(self):
         w = World()
         e = w.engine()
-        self.assertEqual(w.loads, [("big-model", "cuda", "float16", True)])
+        self.assertEqual(w.loads, [("big-model", "cuda", "float16")])
+        self.assertEqual(w.downloads, [("big-model", True)])    # no network
         self.assertEqual((e.name, e.device, e.compute_type),
                          ("big-model", "cuda", "float16"))
         self.assertIsNone(e.fallback_reason)
@@ -110,16 +126,17 @@ class Loading(unittest.TestCase):
         w.cached = False
         # Cached after the first download so the order is visible.
         e = w.engine(device="cpu")
-        self.assertEqual(w.loads, [("small-model", "cpu", "int8", True),
-                                   ("small-model", "cpu", "int8", False)])
+        self.assertEqual(w.downloads, [("small-model", True),
+                                       ("small-model", False)])
+        self.assertEqual(w.loads, [("small-model", "cpu", "int8")])
         self.assertEqual(e.device, "cpu")
 
     def test_other_load_errors_do_not_trigger_a_download(self):
         w = World(gpu_error=RuntimeError("Library cublas64_12.dll is not "
                                          "found or cannot be loaded"))
         e = w.engine()
-        self.assertEqual([(l[1], l[3]) for l in w.loads],
-                         [("cuda", True), ("cpu", True)])
+        self.assertEqual([l[1] for l in w.loads], ["cuda", "cpu"])
+        self.assertEqual([d[1] for d in w.downloads], [True, True])
         self.assertEqual(e.device, "cpu")
 
     def test_telemetry_is_disabled_before_the_library_is_imported(self):
@@ -141,7 +158,7 @@ class PinnedModels(unittest.TestCase):
         rev = stt.MODEL_REVISIONS["small"]
         self.assertRegex(rev, r"^[0-9a-f]{40}$")
         self.assertEqual(w.kwargs, [{"revision": rev}, {"revision": rev}])
-        self.assertEqual([l[3] for l in w.loads], [True, False])
+        self.assertEqual([d[1] for d in w.downloads], [True, False])
 
     def test_the_gpu_model_is_pinned_too(self):
         w = World()

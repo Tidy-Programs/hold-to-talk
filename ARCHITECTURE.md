@@ -3,7 +3,7 @@
 For a developer making a first change. Every claim names the file and
 function it is about, so you can check it against the code. If the code and
 this document disagree, the code is right and this file needs fixing. It was
-last checked against version 0.9.0 (`settings.APP_VERSION`).
+last checked against version 0.9.1 (`settings.APP_VERSION`).
 
 Contents:
 [Big picture](#big-picture) · [Stack and files](#stack-and-files) ·
@@ -68,6 +68,7 @@ textrules.py          dictionary, snippets, spoken formatting, History (SQLite)
 learn.py              suggestions from corrections; manage entries by hand
 keys.py               key names, hotkey parsing, key state, input, clipboard, paste_text
 sounds.py             the two chimes, generated in code
+audiomute.py          mutes other programs' sound while the key is held (Core Audio, ctypes)
 overlay.py            the on-screen indicator (a Tk window)
 mousehook.py          engine side of the mouse-button hook
 mousehelper.py        the helper process that holds the low-level mouse hook
@@ -152,6 +153,7 @@ event instead (`dictate.open_running`). `dictate._listen` also waits for a
 | (unnamed `threading.Timer`) | `Server.p_overlay_preview` | Shows the indicator's "working" look after "listening" in the colour preview. |
 | `signal-listener` | `dictate._listen` | Waits for the quit and open events. |
 | `chime` | `sounds.play` | Plays a chime so the caller never blocks. |
+| `audio-mute` | `audiomute.Muter` (first `mute()` or `recover()`) | Every Core Audio call of "Mute other sound while dictating", with COM initialised for this thread only; the Tk thread only does a queue put. |
 | `cleanup-start` | `cleanup.prepare_in_background` | At start-up and whenever the cleanup settings change while enabled (`dictate.cleanup_reload_hook`): make sure Ollama runs and load the model. |
 | `cleanup-warm` | `cleanup._rewarm_in_background` | Reload the model after a timeout if Ollama had unloaded it. |
 | `cleanup-probe` | `cleanup._probe_in_background` | Re-checks the Ollama server when a dictation found it not "up"; one at a time. |
@@ -213,12 +215,15 @@ it.
    (`App._chime` -> `sounds.play`), and, only if `sounds.mute_start` is true,
    `Recorder.mute_start` silences the first chime-length plus `CHIME_MARGIN`
    (`App._mute_start_wanted`). For keys that include Win or Alt it taps the
-   mask key (`keys.tap_mask_key`).
+   mask key (`keys.tap_mask_key`). Last, if `sounds.mute_others` is on,
+   `App._mute_others` asks `audiomute.Muter.mute()` to mute every other
+   program (see "Muting other sound" below); it is a queue put.
 3. **Listening.** The Tk thread draws the indicator from the recorder's level
    (`App._draw`, `overlay.Overlay.update`). Another key pressed in the first
    `CANCEL_WINDOW` (0.5 s) means the key was part of a shortcut: the
    recording is discarded (`App._discard`, which also plays the stop chime).
-4. **Key up.** `App._finish` calls `Recorder.stop_async`, which keeps the
+4. **Key up.** `App._finish` gives the sound back (`App._unmute_others`) and
+   calls `Recorder.stop_async`, which keeps the
    take open until the tail has arrived, and queues `("take", take, held)` on
    `App._jobs`. The stop chime plays once the tail is in
    (`App._service_recorder`).
@@ -274,7 +279,7 @@ it.
 
 | Rule | Why it matters | Enforced by |
 | --- | --- | --- |
-| **Dictated text is never logged.** Log durations, counts and classes, never the text, the vocabulary, the dictionary or snippet contents, and never an exception message that may quote them (`App._log_error`, `pipeline._safe_error`, `api.log_failure`). Only `--log-text` (`App.log_text`) adds text. | The log is a plain file the user may share. | `tests/test_logging.py` (a static check of every log call in `cleanup`, `pipeline`, `textrules`, `learn`, `settings`, `stt`, `sounds`); `tests/test_engine.py` and `tests/test_perf_engine.py` (the engine and app paths at run time); `tests/test_api_hardening.py` (errors logged by class). `app.py`, `api.py` and `dictate.py` are covered by the run-time tests only. |
+| **Dictated text is never logged.** Log durations, counts and classes, never the text, the vocabulary, the dictionary or snippet contents, and never an exception message that may quote them (`App._log_error`, `pipeline._safe_error`, `api.log_failure`). Only `--log-text` (`App.log_text`) adds text. | The log is a plain file the user may share. | `tests/test_logging.py` (a static check of every log call in `cleanup`, `pipeline`, `textrules`, `learn`, `settings`, `stt`, `sounds`, `audiomute`); `tests/test_engine.py` and `tests/test_perf_engine.py` (the engine and app paths at run time); `tests/test_api_hardening.py` (errors logged by class). `app.py`, `api.py` and `dictate.py` are covered by the run-time tests only. |
 | **Loopback only, and the trust check.** The window's server binds `127.0.0.1` and checks Host, Origin and the access key. Ollama is contacted only at a loopback address, and only after the owner of the local port is checked (`cleanup._listener_verdict`). | Anything else on the machine or in the user's browser could otherwise read the history or receive dictations. | `tests/test_api.py` (loopback, secret, ticket, Origin), `tests/test_api_hardening.py`, `tests/test_cleanup.py` (endpoint, the removed `allow_remote` key, listener verdicts), `tests/test_settings.py`. |
 | **Tk objects only on the Tk thread.** Everything else goes through `App.call_soon` or `App.reload_config`. | Tk is not thread-safe. | Not enforced by a test. `tests/test_perf_engine.py::test_call_soon_callbacks` covers `call_soon` itself. |
 | **Pipeline stages return text and may not raise away the user's words.** `pipeline.run` skips a stage that fails; `cleanup.clean` returns its input on any problem. | A broken stage must never lose a dictation. | `tests/test_pipeline.py` (a failing stage and a non-string result are skipped), `tests/test_cleanup.py`. |
@@ -339,10 +344,51 @@ because that is where missing CUDA DLLs show up. The first one that works
 wins; if the processor is used although a GPU was expected,
 `Engine.fallback_reason` holds a short plain reason for the window. Asking
 ctranslate2 first means a PC without an NVIDIA card never downloads the large
-model. `Engine._load` tries `local_files_only=True` first (so a broken
-network cannot stop a cached model) and downloads only if the model is
-missing, which also means a processor fallback on a GPU PC downloads `small`
-at run time. The CUDA libraries come from pip (`requirements-cuda.txt`);
+model. `Engine._load` calls `stt.resolve_model(name)`, which asks
+`faster_whisper.download_model` for the folder with `local_files_only=True`
+first (so a broken network cannot stop a cached model) and hands the FOLDER, not
+the name, to `WhisperModel`. A processor fallback on a GPU PC downloads `small`
+at run time.
+
+**An incomplete model folder is not a model.** `huggingface_hub.snapshot_download`
+returns a snapshot folder as it is when the Hub cannot be reached (or
+`local_files_only` is set) unless a cached file listing proves something is
+missing, so a folder left half-filled by an interrupted download used to reach
+ctranslate2 ("Unable to open file 'model.bin'") and was never repaired.
+`stt.model_folder_problems(folder, name)` is the one rule: `model.bin`
+(a regular readable file, symlinks followed, at least `MODEL_MIN_BYTES` = 1 MB)
+and `config.json`; for a pinned model also `tokenizer.json`, one
+`vocabulary.*` file, and for `large-v3-turbo` `preprocessor_config.json`. A
+custom unpinned model name is only required to have `model.bin` and
+`config.json`; a local folder path is used as it is. `resolve_model`: complete
+local folder, use it (no network); otherwise download; if the folder that
+`download_model` returns is still incomplete, `_repair` fetches each missing
+file with `hf_hub_download` at the folder's own commit (`force_download` and
+removing the broken entry for a bad `model.bin`) and checks again. If it still
+cannot be completed it raises `stt.ModelDownloadError` (`kind`, `reason`,
+`advice`; `str()` is one plain sentence, "The speech model could not be
+downloaded: no connection to huggingface.co."), classified by
+`classify_download_error` (connection, timeout, proxy, SSL, HTTP 401/403/429/5xx,
+disk full, permission or file in use, interrupted, other). The technical detail
+is logged by `stt` only, through `stt.scrub` (the cache folder and any path
+under a Users folder never reach the log) with the model folder relative to the
+cache. The same rule is in `install.ps1`'s `$ModelCode` (it runs standalone with
+`python -I` and cannot import `stt`); `tests/test_model_complete.py` fails if
+the two drift apart.
+
+**When the download fails.** `App._load_failed` keeps `App.failure` (`kind`,
+`reason`, `advice`) for a `ModelDownloadError` only (any other load failure
+behaves as before: status `failed`, no automatic retry) and schedules
+`_maybe_auto_retry` (checked every tick) after `DOWNLOAD_RETRY_SECONDS` =
+5, 15, 60, then 300 s repeating; a manual `retry_engine()` ("Try again", through
+`/api/engine/retry`) starts at once and resets the waits; a success clears them.
+`dictate.on_status` shows its message box for a download failure once. The live
+state (`api.Server._live`) carries `failure` (while failed) and `download`
+(`size`, `percent`, while loading and `stt.download_progress()` says a download
+is running; the percentage is the size of the model's `blobs` folder against
+the known size in `stt.MODEL_INFO`, capped at 99, and absent for a model whose
+size is not known). The window (`ui/app.js`, `stateWords`) and the tray tooltip
+(`tray.Tray._download_text`, `_failure_text`) show them. The CUDA libraries come from pip (`requirements-cuda.txt`);
 `stt.add_cuda_dll_dirs` puts their `bin` folders on the Windows library (DLL)
 search path before ctranslate2 is imported. Changing `model`, `cpu_model`,
 `device` or `compute_type` needs a restart (`app.RESTART_KEYS`). The window's
@@ -482,6 +528,7 @@ stream, `GET /api/events` (`Server._stream`, `api.Hub`).
 | Log | `...\data\logs\dictate.log` (rotated to `.1` at 1 MB) | `settings.LOG_PATH`, `dictate.CappedLog` |
 | Files the app may leave beside them | `config.json.bad`, `config.json.bad-<time>`, `config.json.copying`, `.cfg-*.tmp`, `history.sqlite3.corrupt-<time>`, `history.sqlite3.copying` | `settings.save_config`, `settings.load_config`, `textrules.History._quarantine` |
 | Record of accepting the Terms of Use: `{"version", "accepted_at" (UTC), "how"}`, how is `installer` or `app` (an `unattended` one is read but never counts as acceptance); local only, nothing personal; a `.terms-*.tmp` while being written | `...\data\terms-accepted.json` | `terms.py` (app), `Write-TermsRecord` in `htt-common.ps1` (installer); removed by `Remove-AppDataFiles` |
+| The list of what "Mute other sound while dictating" muted: `{"version": 1, "muted": [{"id", "pid", "started"}]}`; `id` is a hash of the session's instance identifier (the identifier itself holds a program path), `pid` the process id, `started` the process start time (FILETIME) or null. Exists only while sound is muted; a `.audio-muted-<pid>.tmp` while being written | `...\data\audio-muted.json` | `audiomute.STATE_NAME`; removed by `Remove-AppDataFiles` |
 | Window's browser profile | `%LOCALAPPDATA%\HoldToTalk\window` (a test instance: `window-<tag>`) | `uiwin.profile_dir` |
 | Python environment | `%LOCALAPPDATA%\HoldToTalk\venv` | `install.ps1` |
 | Program files | `%LOCALAPPDATA%\Programs\HoldToTalk` | `install.ps1` |
@@ -545,6 +592,53 @@ in `config.json` is replaced by its default with a warning that names the key
 but never quotes the value (`settings.validate`). Editing `config.json` by
 hand is picked up the next time anything triggers a reload (any change in the
 window) or at the next start.
+
+## Muting other sound
+
+`sounds.mute_others` (Settings > Sounds, off by default) is `audiomute.py`.
+The Core Audio calls are plain `ctypes` COM (no package): `IMMDeviceEnumerator`
+-> every active render endpoint -> `IAudioSessionManager2` -> session
+enumerator -> `IAudioSessionControl2` (`GetSessionInstanceIdentifier`,
+`GetProcessId`) and `ISimpleAudioVolume` (`GetMute`, `SetMute`).
+`audiomute.WasapiBackend` is the real backend; tests use `tests/fakes.py:
+FakeAudio`. Importing the module touches no Windows API.
+
+- **Who calls it.** `App._start` -> `_mute_others` -> `Muter.mute()`, a lock
+  and a queue put (microseconds, whatever Core Audio is doing). The worker
+  thread `audio-mute` does the work; nothing on the Tk thread waits for it.
+- **What is muted.** Every session that is not already muted and whose
+  process is not this process or one of its descendants (`audiomute.own_pids`,
+  a process snapshot), on all active output devices, system sounds included.
+  The chimes are played by this process (`sounds._play_bytes`, `winsound`),
+  so they land in a session of our own pid and stay audible (checked: a
+  `winsound` clip creates a session with this process's id, not a
+  system-sounds session). A session that appears while the key is held is not
+  muted (first version).
+- **How a session is identified.** `(ident, pid)`: `ident` is the first 32
+  hex digits of SHA-256 of the instance identifier (`audiomute.ident_of`), and
+  `pid` the process id. Restore walks the sessions again and matches on both;
+  nothing is held across the hold, so a program that exited is simply not
+  found and skipped. The crash-recovery file also needs the same process start
+  time (`audiomute.process_start_time`).
+- **Where it is given back** (`App._unmute_others`, a queue put that does
+  nothing when nothing is muted): `_finish` (key up), `_discard` (cancel,
+  shortcut, hotkey change, mouse hook stopped, terms, hotkey capture),
+  `set_paused(True)`, `_worker` after a failed dictation (not while the next
+  recording is in progress), `_reload` when the setting is off
+  (`_sync_mute_others`; turned on while the key is held it mutes at once),
+  `_shutdown` (`Muter.close`, waits up to 3 s; also what the tray's Quit and
+  `dictate.py --quit` reach), the safety timer in the worker
+  (`MAX_HOLD_SECONDS`, 5 minutes; the app has no recording limit of its own),
+  and `atexit`. A failed restore is retried every 5 s and keeps the file.
+- **Crash recovery.** Before muting, the worker writes `audio-muted.json`
+  (atomically); if it cannot, it mutes nothing. On restore it is deleted.
+  `App.__init__` calls `Muter.recover()`: with no file nothing starts; with
+  one, the sessions listed that still exist with the same pid and process
+  start time are unmuted and the file is deleted.
+- **Failure is quiet.** An audio error is logged once per kind per 30 s as
+  `Muting other sound: <step> did not work (<ExceptionClass>)`, the dictation
+  carries on, and a refused session (for example an elevated program) is
+  skipped. `tests/test_audiomute.py` covers all of this against the fake.
 
 ## Install, update, uninstall
 
@@ -621,7 +715,14 @@ on every run. Steps, in order:
    `APP_VERSION`). It asks before downloading, and uses the same pinned revision
    as the app (`MODEL_REVISIONS` in `stt.py`, read by `Read-SourceFact` from the
    `"name": "40-hex-commit"` lines, passed as `revision=` to
-   `faster_whisper.download_model`).
+   `faster_whisper.download_model`). Both its "check" and its "get" mode use
+   the completeness rule of `stt.model_folder_problems` (kept in step by
+   `tests/test_model_complete.py`): "check" returns 0 only for a complete
+   folder, "get" completes a partial folder the same way the app does and, if
+   it cannot, exits 4 with one plain line on stderr ("The speech model could
+   not be downloaded: no connection to huggingface.co."), which the engine
+   turns into the warning "The download did not finish. The app will try
+   again on first start."
 7. **Shortcuts and registry.** Start menu and Desktop shortcuts run
    `pythonw dictate.py --open`; the Installed apps entry is written under
    `HKCU\...\Uninstall\HoldToTalk`.
@@ -683,7 +784,9 @@ and the model download write to the same pipes as the engine:
   file exists. "Open folder" opens a path only if it is a folder.
 - `-Check` runs before the Terms of Use page is shown. It looks for Python
   (running `py` and `python` to ask their version) and, if the environment
-  exists, asks it whether the speech model is on disk. It changes nothing.
+  exists, asks it whether the speech model is on disk (`model.py check`: exit 0
+  only for a COMPLETE folder, so `model.present` is false for a half-finished
+  download). It changes nothing.
 
 The rules about the Terms of Use are kept by the engine, not the window:
 

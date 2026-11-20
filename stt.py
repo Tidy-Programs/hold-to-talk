@@ -3,7 +3,9 @@
 import importlib.util
 import logging
 import os
+import re
 import site
+import threading
 import time
 from pathlib import Path
 
@@ -51,6 +53,403 @@ def model_kwargs(name):
     """{"revision": hash} for a pinned model, else {}."""
     rev = model_revision(name)
     return {"revision": rev} if rev else {}
+
+
+# -- is a model folder complete? ---------------------------------------------
+#
+# huggingface_hub hands back a snapshot folder AS IS when the Hub cannot be
+# reached (or local_files_only is set) and no cached file listing proves that
+# something is missing. A folder left half-filled by an interrupted or failed
+# download therefore looks like "the model", and ctranslate2 then fails with
+# "Unable to open file 'model.bin'". So the app decides for itself whether a
+# folder is complete, before ctranslate2 is involved.
+#
+# THE SAME RULE IS IN install.ps1 ($ModelCode: folder_is_complete), which runs
+# standalone and cannot import this file. Change both together;
+# tests/test_model_complete.py fails if they drift apart.
+MODEL_MIN_BYTES = 1_000_000          # a model.bin smaller than this is broken
+# The files faster-whisper reads (faster_whisper.utils.download_model asks for
+# exactly these): model.bin and config.json for ctranslate2, tokenizer.json
+# for the tokenizer (without it faster-whisper would go to the network for
+# one), one vocabulary.* file, and, for the models that ship one,
+# preprocessor_config.json (the 128-mel setting of large-v3-turbo).
+# A pinned model (MODEL_REVISIONS) must have all of them; a custom, unpinned
+# repository only model.bin and config.json (its other files are unknown).
+CORE_FILES = ("model.bin", "config.json")
+EXTRA_FILES = ("tokenizer.json", "vocabulary.*")
+EXTRA_BY_MODEL = {"large-v3-turbo": ("preprocessor_config.json",),
+                  "turbo": ("preprocessor_config.json",)}
+VOCABULARY_FILES = ("vocabulary.json", "vocabulary.txt")
+
+# Per pinned model: (repository, size of model.bin in bytes). Only used to
+# say how big the download is and for a rough percentage.
+MODEL_INFO = {
+    "small": ("Systran/faster-whisper-small", 483_546_902),
+    "large-v3-turbo": ("mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+                       1_617_884_929),
+    "turbo": ("mobiuslabsgmbh/faster-whisper-large-v3-turbo", 1_617_884_929),
+}
+
+
+def _good_file(path, min_bytes=1):
+    """A regular file (a symlink is followed) of at least min_bytes whose
+    first bytes can be read."""
+    try:
+        if not os.path.isfile(path) or os.path.getsize(path) < min_bytes:
+            return False
+        with open(path, "rb") as f:
+            return len(f.read(16)) > 0
+    except (OSError, ValueError):
+        return False
+
+
+def required_files(name):
+    """The files a complete folder of this model has ("vocabulary.*" stands
+    for one of VOCABULARY_FILES); only model.bin and config.json for an
+    unpinned model name."""
+    if model_revision(name) is None:
+        return CORE_FILES
+    return CORE_FILES + EXTRA_FILES + EXTRA_BY_MODEL.get(name.strip(), ())
+
+
+def model_folder_problems(folder, name):
+    """The required files that are missing or broken in `folder` (an empty
+    list means it is complete). model.bin must also be at least
+    MODEL_MIN_BYTES long."""
+    folder = os.fspath(folder)
+    problems = []
+    for fname in required_files(name):
+        if fname == "vocabulary.*":
+            ok = any(_good_file(os.path.join(folder, v))
+                     for v in VOCABULARY_FILES)
+        else:
+            ok = _good_file(os.path.join(folder, fname),
+                            MODEL_MIN_BYTES if fname == "model.bin" else 1)
+        if not ok:
+            problems.append(fname)
+    return problems
+
+
+def model_size_text(name):
+    """'about 1.5 GB' for a pinned model, else None."""
+    info = MODEL_INFO.get(name.strip()) if isinstance(name, str) else None
+    if not info:
+        return None
+    return "about %.1f GB" % (info[1] / 2 ** 30)     # as Windows counts
+
+
+# -- logging without the account name ---------------------------------------
+
+def cache_root():
+    """The Hugging Face cache folder (what huggingface_hub uses)."""
+    env = os.environ
+    if env.get("HF_HUB_CACHE"):
+        return Path(env["HF_HUB_CACHE"])
+    if env.get("HF_HOME"):
+        return Path(env["HF_HOME"]) / "hub"
+    try:
+        import huggingface_hub.constants as hc
+        return Path(hc.HF_HUB_CACHE)
+    except Exception:
+        return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+# The account name may hold spaces ("First Last"): the first folder takes
+# everything up to the next slash, a colon, a quote or the end of the line.
+_USER_FOLDER = re.compile(
+    r"[A-Za-z]:[\\/]+Users[\\/][^\\/:'\"\r\n]*(?:[\\/][^\s'\"]*)*",
+    re.IGNORECASE)
+
+
+def _home_folders():
+    """The account's own folder as the system spells it (home and
+    USERPROFILE), for the log scrubber."""
+    out = []
+    for value in (os.path.expanduser("~"), os.environ.get("USERPROFILE")):
+        if value and len(value) > 3 and value not in out:
+            out.append(value)
+    return out
+
+
+def scrub(text):
+    """A text for the log without the cache folder or any path inside a Users
+    folder (they contain the Windows account name)."""
+    text = str(text)
+    try:
+        root = str(cache_root())
+        if root:
+            text = re.sub(re.escape(root), "<cache>", text,
+                          flags=re.IGNORECASE)
+    except Exception:
+        pass
+    for home in _home_folders():
+        for spelling in {home, home.replace("\\", "/"),
+                         home.replace("/", "\\")}:
+            text = re.sub(re.escape(spelling), "<user path>", text,
+                          flags=re.IGNORECASE)
+    return _USER_FOLDER.sub("<user path>", text)
+
+
+def _relative(folder):
+    """The model folder as a path inside the cache, for the log."""
+    try:
+        return Path(folder).relative_to(cache_root()).as_posix()
+    except (ValueError, OSError):
+        return Path(folder).name
+
+
+# -- why a download failed ----------------------------------------------------
+
+class ModelDownloadError(RuntimeError):
+    """The speech model could not be downloaded or completed. str() is one
+    plain sentence (no path, no library text); `kind` is a short code,
+    `reason` the end of that sentence and `advice` what to do about it. The
+    technical detail is in the log only."""
+
+    def __init__(self, kind, reason, advice):
+        self.kind, self.reason, self.advice = kind, reason, advice
+        super().__init__(f"The speech model could not be downloaded: "
+                         f"{reason}.")
+
+
+_CONNECTION_NAMES = {"ConnectError", "ConnectionError", "NameResolutionError",
+                     "OfflineModeIsEnabled", "LocalEntryNotFoundError",
+                     "NetworkError", "gaierror"}
+_TIMEOUT_NAMES = {"TimeoutException", "ConnectTimeout", "ReadTimeout",
+                  "WriteTimeout", "PoolTimeout", "Timeout", "TimeoutError"}
+_INTERRUPTED_NAMES = {"RemoteProtocolError", "ReadError", "IncompleteRead",
+                      "ChunkedEncodingError"}
+
+
+def _chain(exc):
+    seen = []
+    while exc is not None and all(exc is not s for s in seen) \
+            and len(seen) < 8:
+        seen.append(exc)
+        exc = exc.__cause__ or exc.__context__
+    return seen
+
+
+def classify_download_error(exc, name=None):
+    """A ModelDownloadError (not raised) for what went wrong. exc may be
+    None (the download ended but the folder is still incomplete)."""
+    size = model_size_text(name)
+    disk = (f"there is not enough free disk space ({size} is needed)"
+            if size else "there is not enough free disk space")
+    for e in _chain(exc):
+        names = {c.__name__ for c in type(e).__mro__}
+        text = str(e).lower()
+        if isinstance(e, OSError):
+            if (getattr(e, "errno", None) == 28
+                    or getattr(e, "winerror", None) in (112, 39)
+                    or "no space left" in text
+                    or "not enough space on the disk" in text):
+                return ModelDownloadError(
+                    "disk", disk, "Free up some disk space, then try again.")
+            if (isinstance(e, PermissionError)
+                    or getattr(e, "winerror", None) in (5, 32, 33)):
+                return ModelDownloadError(
+                    "permission",
+                    "the model folder could not be written (access was "
+                    "denied or a file is in use)",
+                    "Close other programs that may be using it, such as "
+                    "antivirus, then try again.")
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if isinstance(status, int) and not isinstance(status, bool):
+            if status in (401, 403):
+                return ModelDownloadError(
+                    "http", f"huggingface.co refused the request (error "
+                    f"{status})", "Try again later. If it keeps happening, "
+                    "this network may block the download.")
+            if status == 429:
+                return ModelDownloadError(
+                    "http", "huggingface.co is asking for fewer requests "
+                    "(error 429)", "Wait a few minutes.")
+            if status >= 500:
+                return ModelDownloadError(
+                    "http", f"huggingface.co has a problem (error "
+                    f"{status})", "Try again later.")
+        if "ProxyError" in names or ("proxy" in text and "connect" in text):
+            return ModelDownloadError(
+                "proxy", "the connection through a proxy failed",
+                "Check your internet connection and proxy settings.")
+        if "SSLError" in names or "certificate verify failed" in text:
+            return ModelDownloadError(
+                "ssl", "a secure connection to huggingface.co could not be "
+                "made", "Check your internet connection, and whether "
+                "security software or a proxy is interfering.")
+        if names & _TIMEOUT_NAMES:
+            return ModelDownloadError(
+                "timeout", "huggingface.co did not answer in time",
+                "Check your internet connection.")
+        if names & _INTERRUPTED_NAMES or "consistency check failed" in text:
+            return ModelDownloadError(
+                "interrupted", "the download was interrupted",
+                "Check your internet connection.")
+        if names & _CONNECTION_NAMES:
+            return ModelDownloadError(
+                "connection", "no connection to huggingface.co",
+                "Check your internet connection.")
+    if exc is None:
+        return ModelDownloadError(
+            "interrupted", "the download was interrupted",
+            "Check your internet connection.")
+    return ModelDownloadError(
+        "other", f"the download failed ({type(exc).__name__})",
+        "The log has the details.")
+
+
+# -- download progress (for the window and the tray) --------------------------
+
+_dl_lock = threading.Lock()
+_dl_active = None            # the model name being downloaded, or None
+
+
+def download_progress():
+    """None, or {"name", "size", "percent"} while this process downloads a
+    speech model: size is 'about 1.5 GB' (or None), percent is 0-99 from the
+    size of the model's cache folder against its known size (None for a model
+    whose size is not known). Any thread; cheap."""
+    with _dl_lock:
+        name = _dl_active
+    if name is None:
+        return None
+    percent = None
+    info = MODEL_INFO.get(name.strip())
+    if info:
+        try:
+            blobs = (cache_root() / ("models--" + info[0].replace("/", "--"))
+                     / "blobs")
+            have = sum(f.stat().st_size for f in blobs.iterdir()
+                       if f.is_file())
+            percent = max(0, min(99, int(have * 100 / info[1])))
+        except OSError:
+            percent = 0
+    return {"name": name, "size": model_size_text(name), "percent": percent}
+
+
+def _repo_of(folder):
+    """(repository, commit, cache folder) from a snapshot folder
+    <cache>/models--Owner--Name/snapshots/<commit>, else None."""
+    p = Path(folder)
+    repo_dir = p.parent.parent
+    if p.parent.name != "snapshots" or not repo_dir.name.startswith("models--"):
+        return None
+    return (repo_dir.name[len("models--"):].replace("--", "/"), p.name,
+            repo_dir.parent)
+
+
+def _is_entry_not_found(exc):
+    names = {c.__name__ for c in type(exc).__mro__}
+    return "EntryNotFoundError" in names and "LocalEntryNotFoundError" \
+        not in names
+
+
+def _repair(folder, problems):
+    """Fetch the missing or broken files of a snapshot folder one by one,
+    pinned to the folder's own commit. Raises what huggingface_hub raises."""
+    found = _repo_of(folder)
+    if found is None:
+        return
+    repo, revision, cache = found
+    import huggingface_hub
+    try:
+        from faster_whisper.utils import disabled_tqdm
+        extra = {"tqdm_class": disabled_tqdm}
+    except Exception:                    # pragma: no cover
+        extra = {}
+    for fname in problems:
+        wanted = VOCABULARY_FILES if fname == "vocabulary.*" else (fname,)
+        failure = None
+        for candidate in wanted:
+            target = os.path.join(os.fspath(folder), candidate)
+            broken = os.path.lexists(target)
+            if broken:
+                # A zero-byte or dangling entry is in the way: only that
+                # entry of the snapshot folder goes, then the file is
+                # fetched again for real.
+                try:
+                    os.unlink(target)
+                except OSError:
+                    pass
+            try:
+                huggingface_hub.hf_hub_download(
+                    repo, candidate, revision=revision, cache_dir=str(cache),
+                    force_download=broken, **extra)
+                failure = None
+                break
+            except Exception as exc:
+                failure = exc
+                if not _is_entry_not_found(exc):
+                    raise
+        if failure is not None:
+            raise failure
+
+
+def _download_error(name, exc, folder=None):
+    err = classify_download_error(exc, name)
+    log.warning("Speech model download failed (%s%s): %s", err.kind,
+                f"; folder {_relative(folder)}" if folder else "",
+                scrub(f"{type(exc).__name__}: {exc}") if exc is not None
+                else "the folder is still incomplete")
+    return err
+
+
+def _download(name, download_model, kwargs):
+    """Download (or complete) the model: the folder, or ModelDownloadError."""
+    global _dl_active
+    with _dl_lock:
+        _dl_active = name
+    try:
+        try:
+            folder = download_model(name, local_files_only=False, **kwargs)
+        except Exception as exc:
+            raise _download_error(name, exc) from None
+        problems = model_folder_problems(folder, name)
+        if problems:
+            log.warning("The download left %s incomplete (%s); fetching the "
+                        "missing files", _relative(folder),
+                        ", ".join(problems))
+            try:
+                _repair(folder, problems)
+            except Exception as exc:
+                raise _download_error(name, exc, folder) from None
+            problems = model_folder_problems(folder, name)
+        if problems:
+            raise _download_error(name, None, folder)
+        return folder
+    finally:
+        with _dl_lock:
+            _dl_active = None
+
+
+def resolve_model(name):
+    """The folder to hand to WhisperModel for a model name: the local cache
+    when it holds a COMPLETE copy (no network is used then, so a broken
+    proxy cannot stop a cached model), else the model is downloaded or
+    completed. A local folder path is returned unchanged. Raises
+    ModelDownloadError when it cannot be had."""
+    if not isinstance(name, str) or os.path.isdir(name):
+        return name
+    import faster_whisper
+    download_model = faster_whisper.download_model
+    kwargs = model_kwargs(name)
+    folder = None
+    try:
+        folder = download_model(name, local_files_only=True, **kwargs)
+    except Exception as exc:
+        if not _is_missing_model(exc):
+            raise
+    if folder is not None:
+        problems = model_folder_problems(folder, name)
+        if not problems:
+            return folder
+        log.info("The speech model on this computer is incomplete (%s: %s)",
+                 _relative(folder), ", ".join(problems))
+    else:
+        log.info("The speech model is not on this computer yet")
+    log.info("Downloading the speech model")
+    return _download(name, download_model, kwargs)
 
 # faster-whisper keeps only the LAST 223 tokens of initial_prompt (half the
 # 448-token context, minus one), so an over-long glossary would silently lose
@@ -238,7 +637,7 @@ class Engine:
             attempts.append((cfg["cpu_model"], "cpu",
                              self._cpu_compute_type(requested)))
 
-        errors = []
+        errors, download_error = [], None
         for name, dev, compute_type in attempts:
             try:
                 log.info("Loading a speech model on %s ...", dev)
@@ -266,11 +665,22 @@ class Engine:
                 break
             except Exception as exc:
                 self.model = None
-                errors.append(f"{name} on {dev}: {exc}")
-                log.warning("Could not use %s on %s: %s", name, dev, exc)
+                if isinstance(exc, ModelDownloadError):
+                    download_error = exc      # plain text, no paths
+                    errors.append(f"{name} on {dev}: {exc}")
+                    log.warning("Could not get %s for %s: %s", name, dev, exc)
+                    if dev == "cuda":
+                        gpu_problem = ("the speech model for the graphics "
+                                       "card could not be downloaded")
+                    continue
+                errors.append(scrub(f"{name} on {dev}: {exc}"))
+                log.warning("Could not use %s on %s: %s", name, dev,
+                            scrub(exc))
                 if dev == "cuda":
                     gpu_problem = _why_gpu_failed(exc)
         if self.model is None:
+            if download_error is not None:
+                raise download_error
             raise RuntimeError("No speech model could be loaded: "
                                + "; ".join(errors or [gpu_problem or
                                                       "no usable device"]))
@@ -333,16 +743,11 @@ class Engine:
     @staticmethod
     def _load(WhisperModel, name, device, compute_type):
         """Load from the local cache only (no network, so a broken proxy
-        cannot stop a cached model); download only if it is missing."""
-        try:
-            return WhisperModel(name, device=device, compute_type=compute_type,
-                                local_files_only=True, **model_kwargs(name))
-        except Exception as exc:
-            if not _is_missing_model(exc):
-                raise
-        log.info("The speech model is not on this computer yet; downloading")
-        return WhisperModel(name, device=device, compute_type=compute_type,
-                            local_files_only=False, **model_kwargs(name))
+        cannot stop a cached model); download only if the model is missing
+        or incomplete. The folder is checked (resolve_model) BEFORE
+        ctranslate2 sees it."""
+        path = resolve_model(name)
+        return WhisperModel(path, device=device, compute_type=compute_type)
 
     def count_tokens(self, text):
         """Whisper tokens in `text` as faster-whisper encodes a prompt."""

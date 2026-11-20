@@ -115,17 +115,120 @@ print(json.dumps({"exe": sys.executable, "ver": list(sys.version_info[:3]),
 '@
 
 $ModelCode = @'
-import sys
-from faster_whisper import download_model
-name, mode = sys.argv[1], sys.argv[2]
-rev = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
-if mode == "check":
+import os, sys
+
+# Is the speech-model folder COMPLETE? THE SAME RULE as stt.py
+# (model_folder_problems): this script runs alone (python -I) and cannot import
+# it, so change both together. tests/test_model_complete.py fails if they drift.
+MIN_BYTES = 1000000
+CORE = ("model.bin", "config.json")
+EXTRA = ("tokenizer.json", "vocabulary.*")
+EXTRA_BY_MODEL = {"large-v3-turbo": ("preprocessor_config.json",),
+                  "turbo": ("preprocessor_config.json",)}
+VOCAB = ("vocabulary.json", "vocabulary.txt")
+
+def good_file(path, min_bytes=1):
     try:
-        download_model(name, local_files_only=True, revision=rev)
-    except Exception:
-        sys.exit(3)
-    sys.exit(0)
-download_model(name, revision=rev)
+        if not os.path.isfile(path) or os.path.getsize(path) < min_bytes:
+            return False
+        with open(path, "rb") as f:
+            return len(f.read(16)) > 0
+    except (OSError, ValueError):
+        return False
+
+def folder_problems(folder, name, pinned):
+    # pinned: the model has a fixed revision (stt.MODEL_REVISIONS); an unpinned
+    # model is only required to have model.bin and config.json.
+    names = CORE + (EXTRA + EXTRA_BY_MODEL.get(name.strip(), ()) if pinned else ())
+    problems = []
+    for fname in names:
+        if fname == "vocabulary.*":
+            ok = any(good_file(os.path.join(folder, v)) for v in VOCAB)
+        else:
+            ok = good_file(os.path.join(folder, fname),
+                           MIN_BYTES if fname == "model.bin" else 1)
+        if not ok:
+            problems.append(fname)
+    return problems
+
+def repair(folder, problems):
+    # Fetch the missing or broken files one by one, pinned to the folder's own
+    # commit (<cache>/models--Owner--Name/snapshots/<commit>).
+    import huggingface_hub
+    snap = os.path.normpath(folder)
+    repo_dir = os.path.dirname(os.path.dirname(snap))
+    if (os.path.basename(os.path.dirname(snap)) != "snapshots"
+            or not os.path.basename(repo_dir).startswith("models--")):
+        return
+    repo = os.path.basename(repo_dir)[len("models--"):].replace("--", "/")
+    for fname in problems:
+        for cand in (VOCAB if fname == "vocabulary.*" else (fname,)):
+            target = os.path.join(snap, cand)
+            broken = os.path.lexists(target)
+            if broken:
+                try:
+                    os.unlink(target)
+                except OSError:
+                    pass
+            try:
+                huggingface_hub.hf_hub_download(
+                    repo, cand, revision=os.path.basename(snap),
+                    cache_dir=os.path.dirname(repo_dir), force_download=broken)
+                break
+            except Exception as exc:
+                kinds = [c.__name__ for c in type(exc).__mro__]
+                absent = ("EntryNotFoundError" in kinds
+                          and "LocalEntryNotFoundError" not in kinds)
+                # Only "vocabulary.json is not in this repository" goes on to
+                # try vocabulary.txt; everything else is the answer.
+                if not (absent and fname == "vocabulary.*" and cand != VOCAB[-1]):
+                    raise
+
+def reason_for(exc):
+    seen = []
+    while exc is not None and exc not in seen and len(seen) < 8:
+        seen.append(exc)
+        kinds = [c.__name__ for c in type(exc).__mro__]
+        if isinstance(exc, OSError) and (getattr(exc, "errno", None) == 28
+                                         or getattr(exc, "winerror", None) == 112):
+            return "there is not enough free disk space"
+        if isinstance(exc, PermissionError):
+            return "the model folder could not be written (access denied or a file in use)"
+        if any(k in kinds for k in ("TimeoutException", "ConnectTimeout", "ReadTimeout", "Timeout")):
+            return "huggingface.co did not answer in time"
+        if any(k in kinds for k in ("ConnectError", "ConnectionError", "OfflineModeIsEnabled",
+                                    "LocalEntryNotFoundError", "NameResolutionError")):
+            return "no connection to huggingface.co"
+        exc = exc.__cause__ or exc.__context__
+    return "the download failed"
+
+def main():
+    from faster_whisper import download_model
+    name, mode = sys.argv[1], sys.argv[2]
+    rev = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
+    if mode == "check":
+        # 0 only for a COMPLETE folder (a half-finished download is "not here").
+        try:
+            folder = download_model(name, local_files_only=True, revision=rev)
+        except Exception:
+            return 3
+        return 3 if folder_problems(folder, name, bool(rev)) else 0
+    try:
+        folder = download_model(name, revision=rev)
+        problems = folder_problems(folder, name, bool(rev))
+        if problems:
+            repair(folder, problems)
+            problems = folder_problems(folder, name, bool(rev))
+        why = "the download was interrupted" if problems else None
+    except Exception as exc:
+        why = reason_for(exc)
+    if why:
+        sys.stderr.write("The speech model could not be downloaded: " + why + ".\n")
+        return 4
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
 '@
 
 function Say([string]$Text = '') { if (-not $EnvOnly) { Write-Host $Text } }

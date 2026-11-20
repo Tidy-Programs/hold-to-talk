@@ -16,7 +16,7 @@ the text is pasted. It also runs on your PC.
 
 1. You need Windows 11 (Windows 10 has not been tested).
 2. On this project's GitHub page, open **Releases** and download
-   **`HoldToTalk-Setup-0.9.0.exe`** (the number is the version).
+   **`HoldToTalk-Setup-0.9.1.exe`** (the number is the version).
 3. Double-click it. A setup window shows the Terms of Use, what will be
    installed and where, and the progress. If Python is not on your PC yet,
    the window offers to install it for you.
@@ -269,7 +269,7 @@ To install Python:
 There are two ways to get the same setup window:
 
 - **The Setup file (easiest).** On this project's GitHub page, open
-  **Releases**, download **`HoldToTalk-Setup-0.9.0.exe`** and double-click
+  **Releases**, download **`HoldToTalk-Setup-0.9.1.exe`** and double-click
   it. No ZIP, no black window, and Step 0 is not needed: if Python is
   missing, the window offers **Install Python for me**. The Setup file only
   unpacks the same files to a temporary folder and opens the setup window;
@@ -325,8 +325,10 @@ There are two ways to get the same setup window:
      to add it. If it is already installed, the page says so.
    - **Speech model:** **Download the speech model now** is ticked to begin
      with. Untick it and nothing is lost, but the first start then downloads
-     the model while the tray icon stays amber ("Getting ready") for many
-     minutes with nothing else to see.
+     the model (the window and the tray icon say "Downloading the speech
+     model", with a percentage) and that takes several minutes. A copy of the
+     model left half-finished by an earlier download does not count as "already
+     on this PC": the installer downloads or completes it.
    - **Your data:** where your settings, history and logs are kept
      (`%LOCALAPPDATA%\HoldToTalk\data`). An update leaves them as they are.
    - **Shortcuts:** a Start menu shortcut, always, and a **Desktop shortcut**
@@ -371,14 +373,14 @@ shown, `install.bat` says why in one line and carries on in text by itself.
 To choose it, open a Command Prompt in the extracted folder (see
 Troubleshooting for how) and run `install.bat -Console`. Running `install.bat`
 with any argument uses the text installer; only a plain double-click opens the
-window. It prints a green title line, "Hold to talk 0.9.0 - installer", and
+window. It prints a green title line, "Hold to talk 0.9.1 - installer", and
 the places it will use, then the summary of the Terms of Use and where the
 full text is, and asks you to type **`I agree`** (any capitals) to continue.
 Type `READ` first to read the full terms in the window, or `NOTEPAD` to open
 them in Notepad. Anything else stops it with nothing changed. It then prints
 the same seven steps, and asks the same questions as it reaches them:
 **"Install the NVIDIA runtime? [Y/n]"**, **"Download the speech model now?
-[Y/n]"** and, after the green line **"Done. Hold to talk 0.9.0 is
+[Y/n]"** and, after the green line **"Done. Hold to talk 0.9.1 is
 installed."**, **"Start Hold to talk now? [Y/n]"**. Press Enter for yes, or
 type `n`. If something goes wrong, a red line says "The installer stopped:"
 with the reason.
@@ -458,6 +460,20 @@ If nothing is heard: Settings > Privacy & security > Microphone must allow
   it silences the first quarter of a second of each recording, which can clip
   the first syllable if you start speaking the moment you press. It is **off**
   by default.
+- **Mute other sound while dictating.** Settings > Sounds > **Mute other sound
+  while dictating** (`sounds.mute_others`, **off** by default). While you hold
+  the key, every other program's sound is muted on all your active output
+  devices (a full mute, not a lower volume), and exactly those programs come
+  back when you let go, cancel, pause or quit. Sound that was already muted
+  stays muted, and the app's own chimes are still heard. People in a call can
+  still hear you; you will not hear them. If the app is stopped without
+  warning while muted, the next start unmutes what it muted (the list is
+  `audio-muted.json` in the data folder, which holds a hash of each session's
+  identifier, its process id and start time, and nothing else); a safety timer
+  also restores after 5 minutes. It uses the Windows audio session controls
+  (the same mute switch as the volume mixer) and needs no extra package.
+  Programs that start playing while you hold the key are not muted (this
+  version); programs running as administrator may refuse to be muted.
 - **Dictionary versus Vocabulary.** Both help with names and special words,
   in different ways:
   - **Dictionary** is a find-and-replace applied to the finished text.
@@ -522,7 +538,7 @@ that need a restart of the app are marked below.
 | AI cleanup | Use AI cleanup (`cleanup.enabled`), model (`cleanup.model`), a trust switch (`cleanup.trust_listener`, shown only when needed) | on; `gemma4:e2b-it-qat`; off |
 | Text | Remove filler words (`remove_fillers`), spoken formatting (`textrules.formatting_commands`), add a space after each dictation (`trailing_space`), restore the clipboard after pasting (`restore_clipboard`) | on; off; on; on |
 | History and learning | Save history (`save_history`), learn clear-cut fixes automatically (`learning.auto_apply`) | on; off |
-| Sounds | Chimes (`sounds.enabled`), volume (`sounds.volume`) | on; 0.5 (half) |
+| Sounds | Chimes (`sounds.enabled`), volume (`sounds.volume`), mute other sound while dictating (`sounds.mute_others`) | on; 0.5 (half); off |
 | Appearance | On-screen indicator colours (`overlay.color`, `overlay.background`) | `#f4f4f5` on `#17181c` |
 | System | Use less graphics memory (`compute_type`, needs a restart), Start with Windows, Pause, Pause shortcut (`pause_hotkey`) | off; off; not paused; none |
 | Snippets page | When snippets fire (`textrules.snippet_mode`: `sentence`, `whole`, `anywhere`) | `sentence` |
@@ -708,7 +724,9 @@ processor, a high-end NVIDIA graphics card), medians. They are not promises.
 - **Text:** the app stores your history, settings, dictionary and snippets
   only in the data folder, `%LOCALAPPDATA%\HoldToTalk\data` (`config.json`,
   `history.sqlite3`, `logs\dictate.log`, and `terms-accepted.json`, the
-  record of accepting the Terms of Use). To clear the history: History >
+  record of accepting the Terms of Use; while "Mute other sound while
+  dictating" is holding sound, also `audio-muted.json`, a short crash-recovery
+  list that is deleted as soon as the sound is back). To clear the history: History >
   **Clear history**, or switch off "Save history", or delete
   `history.sqlite3`. To wipe everything, uninstall and answer yes to deleting
   your data.
@@ -738,6 +756,17 @@ processor, a high-end NVIDIA graphics card), medians. They are not promises.
   it). Start the app as administrator too, if you must.
 - A mouse button used as the hold-to-talk key stops doing its normal job
   while the app is ready. Left and right buttons cannot be used.
+- **Mute other sound while dictating** does not mute a program that starts
+  playing while the key is already held, and cannot mute programs running as
+  **administrator** if Windows refuses. The muting itself has been tested with
+  a stand-in for the audio system and by listing the real sessions, but not
+  yet by ear. When you let go, everything the app muted is unmuted, even a
+  program you muted yourself during the hold (the app cannot tell the two
+  apart). If a muted program is closed and reopened while the key is held,
+  it may come back muted, because Windows can remember a program's mute; to
+  fix it by hand, right-click the speaker icon in the taskbar, choose **Open
+  volume mixer** and unmute it there. After an unclean stop, the next start
+  unmutes only if the recovery list is less than 24 hours old.
 - Some **full-screen games** may hide the on-screen indicator; dictation
   still works. This was not tested.
 - On a **shared PC**, see "How it decides whether to trust the program on its
@@ -791,7 +820,9 @@ changed.
    leftovers (`config.json.bad`, `.bad-<time>`, `.copying`, `.migrated`),
    `history.sqlite3` with its side files and set-aside copies
    (`history.sqlite3.corrupt-<time>`, `.migrated`, `.copying`),
-   `terms-accepted.json` (the record of accepting the Terms of Use), and
+   `terms-accepted.json` (the record of accepting the Terms of Use),
+   `audio-muted.json` (the short list that "Mute other sound while
+   dictating" keeps only while sound is muted), and
    `logs\dictate.log` and `.1`. Anything else found there is left in place
    and listed.
 4. The window has three steps, listed on its left: Confirm, Removing and
@@ -865,9 +896,27 @@ address bar, type `cmd`, press Enter.
   dictation is still in History; use Copy there. Also check that you let go of
   the key: pasting waits until no modifier key is held.
 - **The icon stays amber for a very long time.** The speech model is probably
-  still downloading (you skipped it at install, or it was missing). Quit the
-  app, run Setup (or `install.bat`) again and leave the model download ticked so you see
-  progress. If the window says the model failed to load, it offers a retry.
+  still downloading (you skipped it at install, or it was missing). The window
+  says "Downloading the speech model", with the size and a percentage, and the
+  tray tooltip says so too; it can take several minutes the first time, and
+  once it has downloaded it works offline. If it cannot be downloaded, the
+  icon turns grey and the window says why (see the next entry).
+- **The window says the speech model could not be downloaded.** The window
+  gives the reason in one sentence, for example "no connection to
+  huggingface.co", "there is not enough free disk space (about 1.5 GB is
+  needed)", "the download was interrupted", "huggingface.co refused the
+  request (error 403)" or "the model folder could not be written (access was
+  denied or a file is in use)", and what to do about it. Hold to talk tries
+  again by itself: after 5 seconds, then 15, then 60, then every 5 minutes;
+  **Try again** in the window tries at once. Check your internet connection
+  (a company proxy or security software that blocks huggingface.co is the
+  usual cause on a work PC), free some disk space, or close a program that
+  may be holding the model folder (antivirus), then choose Try again. A
+  half-finished download is completed, not started over. If it never
+  finishes, delete the folder `models--Systran--faster-whisper-small` (and
+  `models--mobiuslabsgmbh--faster-whisper-large-v3-turbo`) inside
+  `%USERPROFILE%\.cache\huggingface\hub` and choose Try again. The log
+  (**Show log**) has the technical detail, without your account name.
 - **The text comes out in the wrong language or garbled.** Choose your
   language in Settings > Microphone and language instead of detecting it.
   Check the microphone with the level test.

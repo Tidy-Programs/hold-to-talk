@@ -134,12 +134,14 @@ class Audio(unittest.TestCase):
 class Settings(unittest.TestCase):
     def test_defaults(self):
         self.assertEqual(sounds.DEFAULTS, {"enabled": True, "volume": 0.5,
-                                           "mute_start": False})
+                                           "mute_start": False,
+                                           "mute_others": False})
         self.assertEqual(sounds.settings_of({}), sounds.DEFAULTS)
         self.assertEqual(sounds.settings_of(None), sounds.DEFAULTS)
 
     def test_merge_and_clamp(self):
-        base = {"enabled": True, "volume": 0.5, "mute_start": False}
+        base = {"enabled": True, "volume": 0.5, "mute_start": False,
+                "mute_others": False}
         self.assertEqual(sounds.settings_of({"sounds": {"volume": 2}}),
                          {**base, "volume": 1.0})
         self.assertEqual(sounds.settings_of({"sounds": {"volume": -1}}),

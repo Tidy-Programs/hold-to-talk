@@ -1919,7 +1919,7 @@ function Get-CannedFacts([hashtable]$Opt) {
     if (-not $Opt) { $Opt = @{} }
     $u = 'C:\Users\you\AppData'
     $f = [ordered]@{
-        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.0'; testMode = [bool]$Opt.TestMode
+        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.1'; testMode = [bool]$Opt.TestMode
         layout = [ordered]@{ installRoot = "$u\Local\Programs\HoldToTalk"; envDir = "$u\Local\HoldToTalk\venv"; dataDir = "$u\Local\HoldToTalk\data"
             startMenuLnk = "$u\Roaming\Microsoft\Windows\Start Menu\Programs\Hold to talk.lnk"; desktopLnk = 'C:\Users\you\Desktop\Hold to talk.lnk' }
         installed = (-not $Opt.NotInstalled)

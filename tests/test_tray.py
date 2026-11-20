@@ -333,6 +333,24 @@ class Menu(unittest.TestCase):
         h.app.status = "failed"
         self.assertEqual(h._status_text(), "Can’t dictate right now")
 
+    def test_the_download_and_its_failure_are_in_the_tooltip(self):
+        h = self.handle(None)
+        h.app.status = "loading"
+        h.app.download_progress = lambda: {"size": "about 0.5 GB",
+                                           "percent": 42}
+        self.assertEqual(h._status_text(), "Downloading the speech model… 42%")
+        h.app.download_progress = lambda: {"size": None, "percent": None}
+        self.assertEqual(h._status_text(), "Downloading the speech model…")
+        h.app.status = "failed"
+        h.app.failure = {"kind": "connection", "advice": "x",
+                         "reason": "no connection to huggingface.co"}
+        h.app.auto_retry_in = lambda: 5.0
+        self.assertEqual(h._status_text(), "Speech model not downloaded: no "
+                         "connection to huggingface.co. Trying again soon.")
+        self.assertLessEqual(len(f"{tray.settings.APP_NAME}: "
+                                 + h._status_text()), 127)
+        self.assertEqual(h._signature()[-1], h._status_text())
+
 
 class Icons(unittest.TestCase):
     def test_states(self):

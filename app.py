@@ -60,6 +60,11 @@ try:                                 # chimes are optional (F2)
 except Exception:                    # pragma: no cover - not landed / broken
     sounds = None
 
+try:                                 # muting other sound is optional too
+    import audiomute
+except Exception:                    # pragma: no cover - not landed / broken
+    audiomute = None
+
 log = logging.getLogger("holdtotalk.app")
 
 TICK_MS = 15
@@ -78,6 +83,10 @@ PAUSE_FLASH_SECONDS = 1.2    # the pill shows paused / resumed this long
 CHIME_MARGIN = 0.08      # s of audio muted beyond the start chime itself
 DEFAULT_MIN_SECONDS = 0.35
 HELD_SECONDS = 300.0     # a failed recording is kept in memory this long
+# A speech model that could not be DOWNLOADED is tried again by itself after
+# these waits (seconds, in order; the last one repeats). "Try again" in the
+# window retries at once and starts the list over.
+DOWNLOAD_RETRY_SECONDS = (5.0, 15.0, 60.0, 300.0)
 LANGUAGE_HINT_RUNS = 10          # same language this many dictations in a row
 LANGUAGE_HINT_PROBABILITY = 0.9  # ... each detected with at least this
 # Windows whose text goes to a shell: a line break pasted there runs a
@@ -174,6 +183,13 @@ class App:
     load succeeds. foreground_class() (replaceable, for tests) names the
     foreground window's class.
 
+    failure: None, or {"kind", "reason", "advice"} while status is "failed"
+    because the speech model could not be DOWNLOADED (stt.ModelDownloadError);
+    the app then retries by itself after DOWNLOAD_RETRY_SECONDS (auto_retry_in()
+    says when) and retry_engine() ("Try again") retries at once.
+    download_progress() is None, or {"size", "percent"} while the model is
+    being downloaded (progress_source supplies it).
+
     terms_pending / accept_terms(): the Terms of Use (terms.py). While they
     are pending the hotkey does nothing; accept_terms() records the
     acceptance and enables dictation at once.
@@ -197,6 +213,8 @@ class App:
 
     # fn() -> window class name of the foreground window. Tests replace it.
     foreground_class = staticmethod(_foreground_class)
+
+    _muter = None                # audiomute.Muter, made when first needed
 
     def __init__(self, cfg, engine=None, dry_run=False):
         self._init_state(cfg, engine, dry_run)
@@ -225,6 +243,7 @@ class App:
         self._worker_thread = threading.Thread(target=self._worker,
                                                name="transcribe", daemon=True)
         self._worker_thread.start()
+        self._audio_recover()
         self.root.after(TICK_MS, self._tick)
 
     def _init_state(self, cfg, engine=None, dry_run=False):
@@ -272,6 +291,7 @@ class App:
         self._chime_take = None      # stop chime once this take is complete
         self._tk_thread = threading.get_ident()
         self._closed = False
+        self._muter = None           # audiomute.Muter, made when first needed
         self._capture = None         # see capture_hotkey()
         self._hook = None            # mousehook.MouseHook while wanted
         self._hook_key = None        # what self._hook was started for
@@ -285,6 +305,12 @@ class App:
         self._held = None            # (samples, expires): see _hold_recording
         self._held_lock = threading.Lock()
         self._retry_held = False     # retry_engine(): queue the held audio
+        # A failed model DOWNLOAD (not any other failure): what the window and
+        # the tray say, and when the next automatic attempt is due.
+        self.failure = None          # {"kind", "reason", "advice"} or None
+        self._auto_retry_at = None   # monotonic time, or None
+        self._download_failures = 0  # in a row; picks the wait
+        self.progress_source = None  # fn() -> {"size", "percent"} or None
         try:
             self._set_pause_hotkey(cfg.get("pause_hotkey"))
         except ValueError as exc:
@@ -400,6 +426,8 @@ class App:
         hook is removed at the next tick). Safe from any thread."""
         self.paused = bool(paused)
         log.info("Paused" if self.paused else "Resumed")
+        if self.paused:
+            self._unmute_others("paused")
 
     def toggle_pause(self, feedback=True):
         """Pause or resume (what the pause shortcut does); with feedback the
@@ -424,14 +452,24 @@ class App:
                 try:
                     engine = factory()
                 except Exception as exc:
-                    self._log_error("Could not load the speech model", exc,
-                                    always_message=True)
+                    failure = self._download_failure(exc)
+                    if failure is not None:
+                        # One plain sentence; the technical detail was
+                        # logged where it happened. No traceback: it would
+                        # only repeat paths.
+                        log.error("Could not load the speech model: %s", exc)
+                    else:
+                        self._log_error("Could not load the speech model",
+                                        exc, always_message=True)
                     # Bind the message now: `exc` is gone after this block.
                     self.call_soon(functools.partial(
-                        self._set_status, "failed", self._why(exc)))
+                        self._load_failed, self._why(exc), failure))
                     return
 
             def finish():
+                self.failure = None
+                self._auto_retry_at = None
+                self._download_failures = 0
                 engine.cfg = self.cfg        # a reload may have happened
                 self.engine = engine
                 self._engine_cls = type(engine)
@@ -451,21 +489,80 @@ class App:
         self.loader_thread.start()
         return self.loader_thread
 
-    def retry_engine(self):
+    def retry_engine(self, manual=True):
         """Try loading the speech model again (after it failed). Safe from
         any thread. Returns True if a new attempt was started; False when
-        there is nothing to retry with or a load is already running."""
+        there is nothing to retry with or a load is already running. A
+        manual retry (the window's "Try again") also starts the waits
+        between automatic download retries over."""
         if self._factory is None or self._load_lock.locked():
             return False
         if self.loader_thread is not None and self.loader_thread.is_alive():
             return False
         if self.status == "ready" and self.engine is not None:
             return False                  # nothing to retry
-        log.info("Loading the speech model again (retry)")
+        log.info("Loading the speech model again (%s)",
+                 "retry" if manual else "automatic retry")
+        if manual:
+            self._download_failures = 0
+        self._auto_retry_at = None
         self._retry_held = self._held is not None   # then transcribe it
         self.engine = None                # free a broken model's memory first
         self.load_engine(self._factory)
         return True
+
+    @staticmethod
+    def _download_failure(exc):
+        """{"kind", "reason", "advice"} when exc says the speech model could
+        not be downloaded (stt.ModelDownloadError), else None."""
+        advice = getattr(exc, "advice", None)
+        if isinstance(advice, str) and isinstance(
+                getattr(exc, "kind", None), str):
+            return {"kind": exc.kind, "reason": str(
+                getattr(exc, "reason", "")), "advice": advice}
+        return None
+
+    def _load_failed(self, detail, failure):
+        """Tk thread: the model did not load. A failed download is tried
+        again by itself after a growing wait (DOWNLOAD_RETRY_SECONDS)."""
+        self.failure = failure
+        if failure is None:
+            self._auto_retry_at = None
+            self._download_failures = 0
+        else:
+            waits = DOWNLOAD_RETRY_SECONDS
+            wait = waits[min(self._download_failures, len(waits) - 1)]
+            self._download_failures += 1
+            self._auto_retry_at = time.monotonic() + wait
+            log.info("The speech model will be tried again in %.0f s", wait)
+        self._set_status("failed", detail)
+
+    def auto_retry_in(self):
+        """Seconds until the next automatic attempt, or None."""
+        at = self._auto_retry_at
+        return None if at is None else max(0.0, at - time.monotonic())
+
+    def _maybe_auto_retry(self):
+        """Tk thread, every tick (cheap): start the automatic retry when due."""
+        at = self._auto_retry_at
+        if at is None or time.monotonic() < at:
+            return
+        if self._closed or self.status != "failed":
+            self._auto_retry_at = None
+            return
+        if not self.retry_engine(manual=False):
+            self._auto_retry_at = time.monotonic() + 5.0
+
+    def download_progress(self):
+        """None, or {"size", "percent"} while the speech model is being
+        downloaded by this app (progress_source supplies it)."""
+        source = self.progress_source
+        if not callable(source):
+            return None
+        try:
+            return source()
+        except Exception:
+            return None
 
     def play_sound(self, kind):
         """Play the "start" or "stop" chime now with the current settings
@@ -653,6 +750,7 @@ class App:
         self.cfg = new
         if self.engine is not None:
             self.engine.cfg = new
+        self._sync_mute_others()
         for msg in result["errors"]:
             log.error("Config not applied: %s", msg)
         if result["applied"]:
@@ -728,6 +826,7 @@ class App:
             except Exception as exc:
                 self._log_error("call_soon callback failed", exc)
         self._sync_hook()
+        self._maybe_auto_retry()
         self._service_recorder()
         if self._held is not None:
             self._expire_held()
@@ -1109,6 +1208,64 @@ class App:
         self._started_at = time.time()
         self._started_mono = time.monotonic()
         self._state = "recording"
+        self._mute_others()
+
+    # -- muting other sound while the key is held (audiomute.py)
+
+    def _mute_others_wanted(self):
+        """sounds.mute_others (default off); never in dry-run."""
+        if (audiomute is None or sounds is None
+                or getattr(self, "dry_run", False)):
+            return False
+        try:
+            return sounds.settings_of(self.cfg).get("mute_others") is True
+        except Exception:
+            return False
+
+    def _get_muter(self):
+        if self._muter is None:
+            self._muter = audiomute.Muter()
+        return self._muter
+
+    def _mute_others(self):
+        """Key down: ask the worker thread to mute every other program (a
+        queue put; the recording never waits). Never breaks dictation."""
+        if not self._mute_others_wanted():
+            return
+        try:
+            self._get_muter().mute()
+        except Exception as exc:
+            log.warning("Muting other sound failed (%s)", type(exc).__name__)
+
+    def _unmute_others(self, why):
+        """Give back what was muted (a queue put). Safe from any thread, and
+        when nothing was muted. Never raises."""
+        muter = self._muter
+        if muter is None:
+            return
+        try:
+            muter.restore(why)
+        except Exception as exc:
+            log.warning("Unmuting other sound failed (%s)", type(exc).__name__)
+
+    def _sync_mute_others(self):
+        """After a settings reload: apply a change of sounds.mute_others now.
+        Off: restore at once. On while the key is held: mute now."""
+        if self._mute_others_wanted():
+            if self._state == "recording":
+                self._mute_others()
+        else:
+            self._unmute_others("the setting was turned off")
+
+    def _audio_recover(self):
+        """At start: undo what an earlier run left muted (crash, kill)."""
+        if audiomute is None or self.dry_run:
+            return
+        try:
+            self._get_muter().recover()
+        except Exception as exc:
+            log.warning("Checking for muted sound failed (%s)",
+                        type(exc).__name__)
 
     def _discard(self, why, kind="discarded", message=None):
         """Throw away the recording in progress, if any: logged (never the
@@ -1122,6 +1279,7 @@ class App:
         else:
             self.recorder.stop()
         self._state = "idle"
+        self._unmute_others("recording discarded")
         log.info("Recording discarded after %.1f s: %s", held, why)
         if not self._closed:
             self._chime("stop")
@@ -1140,6 +1298,7 @@ class App:
         else:
             take = _DoneTake(self.recorder.stop())
         self._state = "idle"
+        self._unmute_others("key released")
         self._chime_take = take
         held = time.monotonic() - self._started_mono
         with self._pending_lock:
@@ -1293,6 +1452,8 @@ class App:
                         "is not loaded."))
             except Exception as exc:
                 self._log_error("Dictation failed", exc)
+                if self._state != "recording":   # not the next dictation's
+                    self._unmute_others("a dictation failed")
                 self._notice("error", f"A dictation failed "
                              f"({type(exc).__name__}). Details are in the "
                              "log.")
@@ -1338,7 +1499,7 @@ class App:
                   "again once the speech model works."
                   if self._hold_recording(samples) else
                   "The recording was dropped."))
-        self.call_soon(functools.partial(self._set_status, "failed", msg))
+        self.call_soon(functools.partial(self._load_failed, msg, None))
         self._engine_ready.clear()
         self._notice("error", msg)
         return None
@@ -1621,6 +1782,13 @@ class App:
         if self._closed:
             return
         self._closed = True
+        muter = self._muter
+        if muter is not None:            # never leave the PC silent
+            try:
+                muter.close()
+            except Exception as exc:
+                log.warning("Unmuting other sound failed (%s)",
+                            type(exc).__name__)
         with self._held_lock:
             self._held = None            # a held recording never outlives us
         self._stop_hook()

@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULES = ("cleanup", "pipeline", "textrules", "learn", "settings", "stt",
-           "sounds")
+           "sounds", "audiomute")
 LEVELS = {"debug", "info", "warning", "warn", "error", "exception",
           "critical", "log"}
 # Names that hold what the user said or configured.

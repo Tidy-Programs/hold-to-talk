@@ -198,7 +198,8 @@ class ValueValidation(unittest.TestCase):
         self.assertEqual(cfg["cleanup"]["timeout"], 5)
         self.assertIs(cfg["cleanup"]["enabled"], False)
         self.assertEqual(cfg["sounds"], {"enabled": True, "volume": 0.25,
-                                         "mute_start": False})
+                                         "mute_start": False,
+                                         "mute_others": False})
         self.assertEqual(cfg["future_key"], {"a": 1})
         for code in ("en", "de", "EN", " fr "):
             self.assertEqual(self.load({"language": code})["language"],
@@ -292,7 +293,7 @@ class SectionsAndNewKeys(unittest.TestCase):
         self.assertIsNone(settings.DEFAULTS["pause_hotkey"])
         self.assertEqual(settings.DEFAULTS["sounds"],
                          {"enabled": True, "volume": 0.5,
-                          "mute_start": False})
+                          "mute_start": False, "mute_others": False})
         for name in ("sounds", "overlay", "learning", "cleanup", "textrules"):
             self.assertIn(name, settings.SECTIONS)
             self.assertIsInstance(settings.DEFAULTS[name], dict)
@@ -304,7 +305,8 @@ class SectionsAndNewKeys(unittest.TestCase):
         self.path.write_text(json.dumps(partial), encoding="utf-8")
         cfg = settings.load_config(self.path)
         self.assertEqual(cfg["sounds"], {"enabled": True, "volume": 0.2,
-                                         "mute_start": False})
+                                         "mute_start": False,
+                                         "mute_others": False})
         self.assertEqual(cfg["overlay"]["background"],
                          settings.OVERLAY_DEFAULTS["background"])
         self.assertEqual(cfg["overlay"]["color"], "#112233")
@@ -352,8 +354,10 @@ class SectionsAndNewKeys(unittest.TestCase):
                          {"sounds": {"volume": 0.0}})
         self.assertEqual(v("sounds", {"enabled": False, "volume": 0.3}),
                          {"sounds": {"enabled": False, "volume": 0.3}})
+        self.assertEqual(v("sounds", {"mute_others": True}),
+                         {"sounds": {"mute_others": True}})
         for bad in ({"enabled": "yes"}, {"volume": "loud"}, {"volume": True},
-                    {"loudness": 1}, {}, "on", None):
+                    {"mute_others": "yes"}, {"loudness": 1}, {}, "on", None):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError):
                     v("sounds", bad)

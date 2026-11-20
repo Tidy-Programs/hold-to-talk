@@ -79,7 +79,7 @@ if ($Check) {
         exit 1
     }
     $facts = [ordered]@{
-        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.0'; testMode = $testMode
+        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.1'; testMode = $testMode
         layout = [ordered]@{ installRoot = $InstallRoot; envDir = $EnvDir; dataDir = $dataDir
             startMenuLnk = (Join-Path $StartMenuDir 'Hold to talk.lnk'); desktopLnk = (Join-Path $DesktopDir 'Hold to talk.lnk') }
         installed = -not (Has 'notinstalled'); dataExists = -not (Has 'nodata')

@@ -3032,7 +3032,7 @@ function Get-CannedFacts([hashtable]$Opt) {
     $free = [int64]182 * 1000000000
     if ($Opt.LowDisk) { $free = [int64]700 * 1000000 }     # less than the ~900 MB the update needs
     $f = [ordered]@{
-        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.0'; termsVersion = $tv; testMode = [bool]$Opt.TestMode
+        kind = 'facts'; appName = 'Hold to talk'; version = '0.9.1'; termsVersion = $tv; testMode = [bool]$Opt.TestMode
         layout = [ordered]@{ installRoot = "$u\Local\Programs\HoldToTalk"; envDir = "$u\Local\HoldToTalk\venv"; dataDir = "$u\Local\HoldToTalk\data"
             startMenuLnk = "$u\Roaming\Microsoft\Windows\Start Menu\Programs\Hold to talk.lnk"; desktopLnk = 'C:\Users\you\Desktop\Hold to talk.lnk' }
         installedVersion = $Opt.Installed
@@ -3498,9 +3498,9 @@ function Invoke-SelfTest {
 
     # install, update and repair: the wording follows the facts
     foreach ($case in @(
-        @{ Mode = 'install'; Installed = $null; Verb = 'Install'; Ger = 'Installing'; Past = 'installed'; Rail = 'Setup'; Noun = 'Installation'; Stop = 'Installation stopped'; Lead = 'Version 0.9.0 is installed in this folder:' },
-        @{ Mode = 'update'; Installed = '0.8.2'; Verb = 'Update'; Ger = 'Updating'; Past = 'updated'; Rail = 'Update'; Noun = 'Update'; Stop = 'Update stopped'; Lead = 'Version 0.9.0 is now installed in this folder:' },
-        @{ Mode = 'repair'; Installed = '0.9.0'; Verb = 'Repair'; Ger = 'Repairing'; Past = 'repaired'; Rail = 'Repair'; Noun = 'Repair'; Stop = 'Repair stopped'; Lead = 'Version 0.9.0 is installed in this folder:' })) {
+        @{ Mode = 'install'; Installed = $null; Verb = 'Install'; Ger = 'Installing'; Past = 'installed'; Rail = 'Setup'; Noun = 'Installation'; Stop = 'Installation stopped'; Lead = 'Version 0.9.1 is installed in this folder:' },
+        @{ Mode = 'update'; Installed = '0.8.2'; Verb = 'Update'; Ger = 'Updating'; Past = 'updated'; Rail = 'Update'; Noun = 'Update'; Stop = 'Update stopped'; Lead = 'Version 0.9.1 is now installed in this folder:' },
+        @{ Mode = 'repair'; Installed = '0.9.1'; Verb = 'Repair'; Ger = 'Repairing'; Past = 'repaired'; Rail = 'Repair'; Noun = 'Repair'; Stop = 'Repair stopped'; Lead = 'Version 0.9.1 is installed in this folder:' })) {
         $m = $case.Mode
         Reset-Ui
         Set-Facts (Get-CannedFacts @{ Gpu = $true; Installed = $case.Installed })
@@ -3510,8 +3510,8 @@ function Invoke-SelfTest {
         Check ($ui.RailText4.Text -eq $case.Ger) "${m}: rail step 4 says '$($ui.RailText4.Text)'"
         Check ($ui.RailText1.Text -eq 'Welcome' -and $ui.RailText2.Text -eq 'Terms of Use' -and $ui.RailText3.Text -eq 'Choices' -and $ui.RailText5.Text -eq 'Finish') "${m}: another rail step changed"
         Check ($ui.UpdateCard.Visibility -eq $(if ($m -eq 'install') { 'Collapsed' } else { 'Visible' })) "${m}: the welcome card is wrong"
-        if ($m -eq 'update') { Check ($ui.UpdateText.Text -eq 'This updates Hold to talk from version 0.8.2 to 0.9.0. It does not install a second copy: your settings and history are kept.') "update: the welcome line is '$($ui.UpdateText.Text)'" }
-        if ($m -eq 'repair') { Check ($ui.UpdateText.Text -eq 'Version 0.9.0 is already installed. This installs it again to repair it; your settings and history are kept.') "repair: the welcome line is '$($ui.UpdateText.Text)'" }
+        if ($m -eq 'update') { Check ($ui.UpdateText.Text -eq 'This updates Hold to talk from version 0.8.2 to 0.9.1. It does not install a second copy: your settings and history are kept.') "update: the welcome line is '$($ui.UpdateText.Text)'" }
+        if ($m -eq 'repair') { Check ($ui.UpdateText.Text -eq 'Version 0.9.1 is already installed. This installs it again to repair it; your settings and history are kept.') "repair: the welcome line is '$($ui.UpdateText.Text)'" }
         if ($m -ne 'install') { Check ($ui.AccountText.Text -notmatch 'nstall') "${m}: the welcome page still says install in '$($ui.AccountText.Text)'" }
         # the terms page is the same in every mode
         Show-Page 'terms'
@@ -3556,7 +3556,7 @@ function Invoke-SelfTest {
     Set-TermsBoxForTest $true
     Show-Page 'choose'
     Press $ui.CheckAgainBtn
-    $script:PendingFacts = Get-CannedFacts @{ Gpu = $false; Installed = '0.9.0' }
+    $script:PendingFacts = Get-CannedFacts @{ Gpu = $false; Installed = '0.9.1' }
     Complete-Check 0
     Check ($script:Mode -eq 'repair' -and [string]$ui.NextBtn.Content -eq 'Repair' -and $script:Window.Title -eq 'Repair Hold to talk' -and $ui.RailText4.Text -eq 'Repairing') "Check again to the same version: $($script:Mode) / $($ui.NextBtn.Content) / $($script:Window.Title)"
     Press $ui.BackBtn; Show-Page 'choose'

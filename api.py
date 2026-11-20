@@ -127,9 +127,10 @@ CAPTURE_SECONDS = 10.0
 HISTORY_MAX_LIMIT = 100000
 CLIPBOARD_MAX = 200000          # characters the Copy button may place
 SAMPLE_SENTENCE = "I sent the {heard} notes to everyone this morning."
-SOUND_DEFAULTS = {"enabled": True, "volume": 0.5,
+SOUND_DEFAULTS = {"enabled": True, "volume": 0.5, "mute_others": False,
                   **{k: v for k, v in (settings.DEFAULTS.get("sounds") or {})
-                     .items() if k in ("enabled", "volume")}}
+                     .items() if k in ("enabled", "volume",
+                                       "mute_others")}}
 _MODEL_NAME = re.compile(r"[A-Za-z0-9._:/\-]{1,100}")
 
 # Request fields as the user knows them (for messages about them).
@@ -318,18 +319,22 @@ def _compute_choice_available():
 
 
 def sounds_of(cfg):
-    """The "sounds" section: {"enabled", "volume"} (sounds.settings_of)."""
+    """The "sounds" section: {"enabled", "volume", "mute_others"}
+    (sounds.settings_of)."""
     try:
         import sounds
         out = sounds.settings_of(cfg)
         return {"enabled": bool(out["enabled"]),
-                "volume": float(out["volume"])}
+                "volume": float(out["volume"]),
+                "mute_others": bool(out.get("mute_others", False))}
     except Exception:
         out = dict(SOUND_DEFAULTS)
         sub = cfg.get("sounds") if isinstance(cfg, dict) else None
         if isinstance(sub, dict):
             if isinstance(sub.get("enabled"), bool):
                 out["enabled"] = sub["enabled"]
+            if isinstance(sub.get("mute_others"), bool):
+                out["mute_others"] = sub["mute_others"]
             v = sub.get("volume")
             if (isinstance(v, (int, float)) and not isinstance(v, bool)
                     and 0.0 <= v <= 1.0):
@@ -980,7 +985,46 @@ class Server:
             "mic_problem": self._mic_problem(),
             "language_hint": self._language_hint(),
             "held_seconds": self._held_seconds(),
+            "failure": self._load_failure(),
+            "download": self._download_state(),
         }
+
+    def _load_failure(self):
+        """{"kind", "reason", "advice", "auto_retry"} while the speech model
+        failed because it could not be DOWNLOADED (the window shows the plain
+        reason and what to do; auto_retry: the app tries again by itself),
+        else None."""
+        app = self.app
+        try:
+            failure = getattr(app, "failure", None)
+            if getattr(app, "status", None) != "failed" or not isinstance(
+                    failure, dict):
+                return None
+            retry_in = getattr(app, "auto_retry_in", None)
+            return {"kind": str(failure.get("kind", "")),
+                    "reason": str(failure.get("reason", "")),
+                    "advice": str(failure.get("advice", "")),
+                    "auto_retry": callable(retry_in)
+                    and retry_in() is not None}
+        except Exception:
+            return None
+
+    def _download_state(self):
+        """{"size", "percent"} while the app downloads the speech model
+        (percent is None when it cannot be told), else None."""
+        try:
+            if getattr(self.app, "status", None) != "loading":
+                return None
+            get = getattr(self.app, "download_progress", None)
+            state = get() if callable(get) else None
+            if not isinstance(state, dict):
+                return None
+            percent = state.get("percent")
+            return {"size": state.get("size") or None,
+                    "percent": percent if isinstance(percent, int)
+                    and not isinstance(percent, bool) else None}
+        except Exception:
+            return None
 
     def _language_hint(self):
         """{"code", "name"} when the app suggests a language (app.
@@ -1384,11 +1428,16 @@ class Server:
                 engine_checked[key] = value
             elif key == "sounds":
                 if not isinstance(value, dict) or not value or set(value) - {
-                        "enabled", "volume"}:
-                    raise _bad("Send the chimes as enabled/volume.")
+                        "enabled", "volume", "mute_others"}:
+                    raise _bad("Send the chimes as enabled/volume and the "
+                               "muting as mute_others.")
                 if "enabled" in value and not isinstance(value["enabled"],
                                                          bool):
                     raise _bad("Chimes can only be switched on or off.")
+                if "mute_others" in value and not isinstance(
+                        value["mute_others"], bool):
+                    raise _bad("Muting other sound can only be switched on "
+                               "or off.")
                 if "volume" in value and (
                         isinstance(value["volume"], bool) or not isinstance(
                             value["volume"], (int, float))):

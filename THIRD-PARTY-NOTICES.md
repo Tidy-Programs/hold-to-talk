@@ -134,4 +134,7 @@ OpenAI). You can choose other models in the settings file (`model`,
 - **Microsoft Edge** or **Google Chrome**: the window is shown by one of them
   in "app mode". Neither is part of this project or installed by it; they are
   under their own terms.
-- **Windows**, **PowerShell**, **Python** (python.org).
+- **Windows**, **PowerShell**, **Python** (python.org). "Mute other sound while
+  dictating" (`audiomute.py`) calls the Windows Core Audio API (WASAPI session
+  controls) directly through Python's `ctypes`; it adds no library, so nothing
+  is added to the lock files.

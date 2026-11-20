@@ -3,6 +3,50 @@
 All notable changes to Hold to talk. The version is `APP_VERSION` in
 `settings.py`.
 
+## 0.9.1
+
+Release date: not yet released
+
+**Fixed**
+- The log scrubber now removes a Windows account name that contains a space
+  (`stt.scrub` used to leave the second word), and the profile folder in
+  either slash style.
+- A speech model that a failed or interrupted download had left incomplete
+  (found on a freshly installed PC: "Unable to open file 'model.bin'", then
+  "No speech model could be loaded", with no way out) is now noticed before
+  the speech library sees it. The app checks that the model folder is
+  complete (`model.bin` readable and at least 1 MB, plus the config,
+  tokenizer, vocabulary and, for `large-v3-turbo`, preprocessor files), counts
+  an incomplete folder as "not on this computer", and fetches the missing
+  files at the pinned revision (`stt.resolve_model`). The installer's check
+  ("is the model already on this PC?") and its download use the same rule, so
+  Setup no longer says an unfinished model is present and skips it.
+- When the model cannot be downloaded, the window and the tray tooltip now say
+  why in one plain sentence and what to do (no connection, timeout, proxy,
+  refused or busy server, disk full, file in use, interrupted), instead of a
+  library message with a folder path. The log keeps the detail, without your
+  account name or the full cache path.
+- A failed download is no longer left to chance: the app tries again by itself
+  after 5 seconds, then 15, then 60, then every 5 minutes (the message box
+  about the failure is shown once, not at every attempt); "Try again" in the
+  window retries at once and starts the waits over.
+
+**New**
+- Settings > Sounds > **Mute other sound while dictating** (off by default,
+  `sounds.mute_others`): while you hold the key every other program's sound is
+  muted on all active output devices, and exactly those sessions are unmuted
+  when you let go, cancel, pause or quit. Sessions already muted are left as
+  they are, the app's own chimes stay audible, and a program that starts
+  playing while the key is held is not muted in this first version. It never
+  leaves the PC silent: a safety timer (5 minutes), and a small recovery file
+  (`audio-muted.json`, removed by the uninstaller's "delete my data") that the
+  next start uses to unmute after a crash. Uses the Windows audio API through
+  `ctypes`; no new package.
+- While the app downloads the speech model, the window says "Downloading the
+  speech model (about 1.5 GB)... this can take several minutes", with a
+  percentage measured from the size of the download folder, and the tray
+  tooltip says "Downloading the speech model" with the percentage.
+
 ## 0.9.0
 
 Release date: 18 November 2026

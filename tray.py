@@ -418,7 +418,8 @@ class TrayHandle:
         return (self.state(), self._terms_pending(), cfg.get("hotkey"),
                 repr(cfg.get("input_device")),
                 settings.cleanup_enabled(cfg),
-                getattr(self.app, "mouse_hook_state", None))
+                getattr(self.app, "mouse_hook_state", None),
+                self._download_text(), self._failure_text())
 
     def _poll(self):
         last = None
@@ -446,12 +447,43 @@ class TrayHandle:
             self.icon.title = title
         self.icon.update_menu()
 
+    def _download_text(self):
+        """'Downloading the speech model… 42%' while the app downloads it,
+        else None."""
+        try:
+            get = getattr(self.app, "download_progress", None)
+            info = get() if callable(get) else None
+            if getattr(self.app, "status", None) != "loading" or not info:
+                return None
+            percent = info.get("percent")
+            return "Downloading the speech model…" + (
+                f" {percent}%" if isinstance(percent, int)
+                and not isinstance(percent, bool) else "")
+        except Exception:
+            return None
+
+    def _failure_text(self):
+        """Why the speech model could not be downloaded (plain, short), or
+        None when it failed for another reason."""
+        try:
+            failure = getattr(self.app, "failure", None)
+            if (getattr(self.app, "status", None) != "failed"
+                    or not isinstance(failure, dict)):
+                return None
+            retry_in = getattr(self.app, "auto_retry_in", None)
+            tail = (" Trying again soon."
+                    if callable(retry_in) and retry_in() is not None else "")
+            return ("Speech model not downloaded: "
+                    f"{failure.get('reason', '')}.{tail}")
+        except Exception:
+            return None
+
     def _status_text(self, *_):
         state = self.state()
         if state == "loading":
-            return "Getting ready…"
+            return self._download_text() or "Getting ready…"
         if state == "failed":
-            return "Can’t dictate right now"
+            return self._failure_text() or "Can’t dictate right now"
         if self._terms_pending():
             return "Off: accept the Terms of Use (open the window)"
         if state == "paused":

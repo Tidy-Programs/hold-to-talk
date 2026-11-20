@@ -28,4 +28,4 @@ body:
     attributes:
       label: Version (if it matters)
       description: Settings > About in the app.
-      placeholder: "0.9.0"
+      placeholder: "0.9.1"

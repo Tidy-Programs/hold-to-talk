@@ -866,11 +866,26 @@ class NewSettings(ServerCase):
         self.assertEqual(cfg["settings"]["sounds"], api.SOUND_DEFAULTS)
         res = self.ok("POST", "/api/settings", {"sounds": {"volume": 0.25}})
         self.assertEqual(res["settings"]["sounds"],
-                         {"enabled": True, "volume": 0.25})
+                         {"enabled": True, "volume": 0.25,
+                          "mute_others": False})
         self.ok("POST", "/api/settings", {"sounds": {"enabled": False}})
         self.assertEqual(json.loads(self.cfg_path.read_text(
             encoding="utf-8"))["sounds"], {"enabled": False, "volume": 0.25})
+        # Mute other sound while dictating: off by default, a bool, saved
+        # and applied live (the running app reads it from its reloaded cfg).
+        res = self.ok("POST", "/api/settings",
+                      {"sounds": {"mute_others": True}})
+        self.assertIs(res["settings"]["sounds"]["mute_others"], True)
+        self.assertIs(json.loads(self.cfg_path.read_text(
+            encoding="utf-8"))["sounds"]["mute_others"], True)
+        self.assertIs(self.app.cfg["sounds"]["mute_others"], True)
+        self.assertIs(self.ok("GET", "/api/config")["settings"]["sounds"]
+                      ["mute_others"], True)
+        res = self.ok("POST", "/api/settings",
+                      {"sounds": {"mute_others": False}})
+        self.assertIs(self.app.cfg["sounds"]["mute_others"], False)
         for bad in ({"volume": True}, {"volume": "loud"}, {"enabled": "yes"},
+                    {"mute_others": "yes"}, {"mute_others": 1},
                     {"loud": 1}, {}, "on"):
             self.assertEqual(self.post("/api/settings", {"sounds": bad})[0],
                              400, bad)

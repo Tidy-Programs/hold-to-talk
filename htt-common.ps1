@@ -218,9 +218,12 @@ function Remove-AppDataFiles {
     # the quarantined copy of a damaged one, which holds dictated text),
     # terms.py and install.ps1 (terms-accepted.json, the record of accepting
     # the Terms of Use, and its .terms-*.tmp while being written) and
-    # dictate.py (logs\dictate.log, .1).
+    # dictate.py (logs\dictate.log, .1), and audiomute.py (audio-muted.json, the
+    # list of what was muted while the key is held, and .audio-muted-*.tmp
+    # while it is being written).
     $files = '^config\.json$', '^config\.json\.(bad|migrated|copying)[^\\/]*$', '^\.cfg-[^\\/]*\.tmp$',
              '^terms-accepted\.json$', '^\.terms-[^\\/]*\.tmp$',
+             '^audio-muted\.json$', '^\.audio-muted-[^\\/]*\.tmp$',
              '^history\.sqlite3$', '^history\.sqlite3(-wal|-shm|-journal)$',
              '^history\.sqlite3\.(migrated|copying|corrupt-)[^\\/]*$'
     foreach ($f in @(Get-ChildItem -LiteralPath $Dir -Force -File -ErrorAction SilentlyContinue)) {

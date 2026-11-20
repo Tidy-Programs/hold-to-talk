@@ -8,6 +8,7 @@
 api.py
 app.py
 audio.py
+audiomute.py
 cleanup.py
 dictate.py
 keys.py

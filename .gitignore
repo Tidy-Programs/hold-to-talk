@@ -14,6 +14,9 @@ history.sqlite3*
 *.db
 *.db-wal
 *.db-shm
+# The list of programs muted while the key is held (a crash-recovery file)
+audio-muted.json
+.audio-muted-*.tmp
 # Logs can contain dictated text
 dictate.log*
 *.log

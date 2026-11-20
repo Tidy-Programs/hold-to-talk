@@ -23,7 +23,7 @@ import textrules
 log = logging.getLogger("holdtotalk.settings")
 
 APP_NAME = "Hold to talk"        # the one place the display name lives
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 TERMS_VERSION = "1.0"            # must match the first line of TERMS.md
 APP_DIR = Path(__file__).resolve().parent     # the code folder only
 
@@ -710,8 +710,8 @@ def validate_change(key, value, cfg=None):
     pause_hotkey None (off), or a spec keys.parse_hotkey accepts that is not
                  the main hotkey
     language     see normalize_language
-    sounds       {"enabled": bool, "volume": 0.0-1.0 (clamped)}; only the
-                 keys named are changed
+    sounds       {"enabled": bool, "volume": 0.0-1.0 (clamped),
+                 "mute_others": bool}; only the keys named are changed
     """
     cfg = cfg if isinstance(cfg, dict) else {}
     if key == "hotkey":
@@ -739,14 +739,19 @@ def validate_change(key, value, cfg=None):
     if key == "language":
         return {"language": normalize_language(value)}
     if key == "sounds":
-        if not isinstance(value, dict) or set(value) - {"enabled", "volume"}:
-            raise ValueError("Send the sounds setting as enabled and/or "
-                             "volume.")
+        if not isinstance(value, dict) or set(value) - {
+                "enabled", "volume", "mute_others"}:
+            raise ValueError("Send the sounds setting as enabled, volume "
+                             "and/or mute_others.")
         out = {}
         if "enabled" in value:
             if not isinstance(value["enabled"], bool):
                 raise ValueError("Sounds on/off must be true or false.")
             out["enabled"] = value["enabled"]
+        if "mute_others" in value:
+            if not isinstance(value["mute_others"], bool):
+                raise ValueError("Muting other sound must be true or false.")
+            out["mute_others"] = value["mute_others"]
         if "volume" in value:
             vol = value["volume"]
             if not _is_number(vol):

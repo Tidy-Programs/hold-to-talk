@@ -209,10 +209,13 @@ class Requirements(unittest.TestCase):
         for path in ROOT.glob("*.py"):
             found |= imported_names(path) - stdlib - local_modules()
         # Import name -> the distribution that provides it. ctranslate2 comes
-        # with faster-whisper; stt.py only touches it lazily.
+        # with faster-whisper; stt.py only touches it lazily. The same goes
+        # for huggingface_hub (faster-whisper requires it, the lock file pins
+        # it): stt.py uses it lazily to complete a half-finished download.
         provided = {"numpy": "numpy", "sounddevice": "sounddevice",
                     "faster_whisper": "faster-whisper", "pystray": "pystray",
-                    "PIL": "pillow", "ctranslate2": "faster-whisper"}
+                    "PIL": "pillow", "ctranslate2": "faster-whisper",
+                    "huggingface_hub": "faster-whisper"}
         self.assertEqual(found - set(provided), set(),
                          "a new third-party import: add it to requirements.txt "
                          "and to THIRD-PARTY-NOTICES.md")
@@ -680,11 +683,13 @@ class InstallEndToEnd(unittest.TestCase):
                 "history.sqlite3.corrupt-20260101-000000",
                 "history.sqlite3.corrupt-20260102-123456",
                 "terms-accepted.json", ".terms-ab12cd34.tmp",
+                "audio-muted.json", ".audio-muted-4321.tmp",
                 "logs/dictate.log", "logs/dictate.log.1"]
         theirs = ["notes.docx", "Photos/me.jpg", "logs/other.log",
                   "history.sqlite3.backup-by-me", "config.json.old",
                   "history.sqlite3.corrupt", "my-config.json.copying",
-                  "terms-accepted.json.bak", "my-terms-accepted.json"]
+                  "terms-accepted.json.bak", "my-terms-accepted.json",
+                  "audio-muted.json.bak", "my-audio-muted.json"]
         for rel in mine + theirs:
             (home / rel).write_text("x", encoding="utf-8")
         code, out = run_bat(self.prog / "uninstall.bat", "-Yes -DeleteData",
@@ -701,7 +706,7 @@ class InstallEndToEnd(unittest.TestCase):
         home = self.tmp / "only-mine"
         (home / "logs").mkdir(parents=True)
         for rel in ("config.json", "history.sqlite3", "logs/dictate.log",
-                    "terms-accepted.json"):
+                    "terms-accepted.json", "audio-muted.json"):
             (home / rel).write_text("x", encoding="utf-8")
         script = ("& { . $env:HTT_COMMON; $l = @(Remove-AppDataFiles "
                   "$env:HTT_DIR); 'left=' + $l.Count }")

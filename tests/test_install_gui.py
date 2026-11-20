@@ -328,7 +328,7 @@ class AutoRunWithTheFakeEngine(unittest.TestCase):
         self.assertEqual(w["button"], "Install")
         self.assertEqual(w["page title"], "Installing Hold to talk")
         self.assertEqual(w["result"], "Hold to talk is installed")
-        self.assertEqual(w["lead"], "Version 0.9.0 is installed in this folder:")
+        self.assertEqual(w["lead"], "Version 0.9.1 is installed in this folder:")
 
     def test_update_mode_says_update_everywhere(self):
         code, out, runs = self.auto("ok,update", "install")
@@ -341,7 +341,7 @@ class AutoRunWithTheFakeEngine(unittest.TestCase):
         self.assertEqual(w["button"], "Update")
         self.assertEqual(w["page title"], "Updating Hold to talk")
         self.assertEqual(w["result"], "Hold to talk is updated")
-        self.assertEqual(w["lead"], "Version 0.9.0 is now installed in this folder:")
+        self.assertEqual(w["lead"], "Version 0.9.1 is now installed in this folder:")
         # the engine still gets the same arguments and the terms are still accepted
         import settings
         self.assertEqual(self.progress_params(runs)["AcceptedTerms"], settings.TERMS_VERSION)

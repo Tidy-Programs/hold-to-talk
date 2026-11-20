@@ -248,3 +248,113 @@ class FakeSounds:
 
     def wav_bytes(self, kind, volume):
         return self._real.wav_bytes(kind, volume)    # pure: no playback
+
+
+def make_model_folder(cache, name, revision=None, skip=(), model_bytes=1_500_000,
+                      vocabulary="vocabulary.json"):
+    """A speech-model snapshot folder <cache>/models--Owner--Name/snapshots/
+    <commit> with the files a complete model has (what stt.required_files
+    names), except those in `skip`. Returns the folder. Nothing is
+    downloaded: every file is a few bytes of filler (model.bin: model_bytes)."""
+    import stt
+    repo = stt.MODEL_INFO[name][0] if name in stt.MODEL_INFO \
+        else "Fake/" + name.replace("/", "-")
+    rev = revision or stt.model_revision(name) or "0" * 40
+    folder = Path(cache) / ("models--" + repo.replace("/", "--")) \
+        / "snapshots" / rev
+    folder.mkdir(parents=True, exist_ok=True)
+    for fname in stt.required_files(name):
+        if fname == "vocabulary.*":
+            fname = vocabulary
+        if fname in skip or (fname == vocabulary and "vocabulary.*" in skip):
+            continue
+        target = folder / fname
+        if fname == "model.bin":
+            with open(target, "wb") as f:       # cheap: no data is written
+                f.truncate(model_bytes)
+        else:
+            target.write_bytes(b"x" * 12)
+    return folder
+
+
+class FakeAudio:
+    """An audio backend for audiomute.Muter: a list of fake sessions, nothing
+    real. Every call records the thread it ran on (the Muter must use one
+    worker thread for all of them, never the caller's). `sessions` maps an
+    instance name to a dict(pid, muted, system, alive, refuse)."""
+
+    def __init__(self, own=(), delay=0.0):
+        self.sessions = {}
+        self.starts = {}              # pid -> process start time
+        self.own = set(own)
+        self.delay = delay            # seconds every call takes
+        self.fail = 0                 # the next N list/set calls raise
+        self.begun = self.ended = 0
+        self.threads = set()
+        self.calls = []               # (name, thread ident)
+        self.set_calls = []           # (keys, muted)
+
+    def add(self, name, pid, muted=False, system=False, start=None,
+            refuse=False):
+        self.sessions[name] = dict(pid=pid, muted=muted, system=system,
+                                   alive=True, refuse=refuse)
+        self.starts[pid] = 1000 + pid if start is None else start
+        return name
+
+    def is_muted(self, name):
+        return self.sessions[name]["muted"]
+
+    def _enter(self, what):
+        ident = threading.get_ident()
+        self.threads.add(ident)
+        self.calls.append((what, ident))
+        if self.delay:
+            import time
+            time.sleep(self.delay)
+        if self.fail:
+            self.fail -= 1
+            import audiomute
+            raise audiomute.AudioError("0x88890004")
+
+    # the backend interface
+    def begin(self):
+        self.begun += 1
+        self.calls.append(("begin", threading.get_ident()))
+
+    def end(self):
+        self.ended += 1
+        self.calls.append(("end", threading.get_ident()))
+
+    def own_pids(self):
+        self._enter("own_pids")
+        return set(self.own)
+
+    def start_time(self, pid):
+        self._enter("start_time")
+        return self.starts.get(pid)
+
+    def list_sessions(self):
+        self._enter("list_sessions")
+        import audiomute
+        return [audiomute.Session(n, s["pid"], s["muted"], s["system"])
+                for n, s in self.sessions.items() if s["alive"]]
+
+    def set_mute(self, keys, muted):
+        self._enter("set_mute")
+        import audiomute
+        self.set_calls.append((list(keys), muted))
+        want, done, failed = set(keys), audiomute.MuteResult(), set()
+        for name, s in self.sessions.items():
+            key = (audiomute.ident_of(name), s["pid"])
+            if not (s["alive"] and key in want):
+                continue
+            refuse = s["refuse"]          # True: always; N: the next N calls
+            if refuse:
+                if refuse is not True:
+                    s["refuse"] = refuse - 1
+                failed.add(key)           # found, but SetMute raised
+                continue
+            s["muted"] = bool(muted)
+            done.add(key)
+        done.failed = frozenset(failed)
+        return done

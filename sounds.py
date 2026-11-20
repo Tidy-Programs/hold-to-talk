@@ -26,7 +26,10 @@ log = logging.getLogger("holdtotalk.sounds")
 # mute_start: replace the first chime-length of each recording with silence so
 # the start chime is not captured by the microphone (app.py); off by default
 # because it can clip the first syllable.
-DEFAULTS = {"enabled": True, "volume": 0.5, "mute_start": False}
+# mute_others: while the hold-to-talk key is held every other program's sound
+# is muted (audiomute.py); off by default.
+DEFAULTS = {"enabled": True, "volume": 0.5, "mute_start": False,
+            "mute_others": False}
 
 RATE = 22050
 NOTE_SECONDS = 0.085                 # two notes: 170 ms in all
@@ -42,7 +45,7 @@ KINDS = tuple(NOTES)
 
 def settings_of(cfg):
     """cfg["sounds"] over DEFAULTS: {"enabled": bool, "volume": 0.0-1.0,
-    "mute_start": bool}.
+    "mute_start": bool, "mute_others": bool}.
     A malformed value falls back to its default; volume is clamped."""
     out = dict(DEFAULTS)
     sub = cfg.get("sounds") if isinstance(cfg, dict) else None
@@ -51,6 +54,8 @@ def settings_of(cfg):
             out["enabled"] = sub["enabled"]
         if isinstance(sub.get("mute_start"), bool):
             out["mute_start"] = sub["mute_start"]
+        if isinstance(sub.get("mute_others"), bool):
+            out["mute_others"] = sub["mute_others"]
         out["volume"] = _volume(sub.get("volume"), DEFAULTS["volume"])
     return out
 
