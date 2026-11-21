@@ -958,14 +958,14 @@ Please do not put the details of a security problem in a public issue.
 Hold to talk is free to use, but it is not open-source software. `LICENSE`
 (the Hold to talk Licence) has the rules. In short: you may install and use
 it on your own computers, or one you have been given to use, for any lawful
-purpose including work, and change the code for your own use; you may not give, send or publish the program or its code to anyone
-else, changed or unchanged, or sell it. To share it, send people the link to
-this project's page so that they download it there themselves. The Terms of
-Use (`TERMS.md`) apply in addition.
-Hold to talk is an independent
-project and is not affiliated with, endorsed by or sponsored by the makers of
-any product or service named in its documents; those names belong to their
-owners. Libraries and models
-downloaded by the installer have
-their own licences, including NVIDIA's for the optional graphics-card
-runtime: see `THIRD-PARTY-NOTICES.md`.
+purpose including work, and change the code for your own use; you may not
+give, send or publish the program or its code to anyone else, changed or
+unchanged, or sell it. To share it, send people the link to this project's
+page so that they download it there themselves. The Terms of Use (`TERMS.md`)
+apply in addition.
+
+Hold to talk is an independent project and is not affiliated with, endorsed
+by or sponsored by the makers of any product or service named in its
+documents; those names belong to their owners. Libraries and models
+downloaded by the installer have their own licences, including NVIDIA's for
+the optional graphics-card runtime: see `THIRD-PARTY-NOTICES.md`.
