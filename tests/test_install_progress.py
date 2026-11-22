@@ -96,6 +96,13 @@ class Result:
         return [m for m in self.markers if m["kind"] == kind]
 
 
+def long_name(path):
+    """A path as the installer reports it: folder names in their long form.
+    %TEMP%, and so the places the tests make, can be in the short 8.3 form
+    (as on GitHub's machines); the part that exists is expanded."""
+    return os.path.realpath(path)
+
+
 @unittest.skipUnless(HAVE_PS, "needs Windows PowerShell")
 class EngineTestCase(unittest.TestCase):
     @classmethod
@@ -201,10 +208,10 @@ class Check(EngineTestCase):
         self.assertEqual(f["termsVersion"], settings.TERMS_VERSION)
         self.assertIs(f["testMode"], True)
         self.assertEqual(f["layout"], dict(
-            installRoot=str(p["prog"]), envDir=str(p["env"]),
-            dataDir=str(p["data"]),
-            startMenuLnk=str(p["sm"] / "Hold to talk.lnk"),
-            desktopLnk=str(p["dt"] / "Hold to talk.lnk")))
+            installRoot=long_name(p["prog"]), envDir=long_name(p["env"]),
+            dataDir=long_name(p["data"]),
+            startMenuLnk=long_name(p["sm"] / "Hold to talk.lnk"),
+            desktopLnk=long_name(p["dt"] / "Hold to talk.lnk")))
         self.assertIsNone(f["installedVersion"])
         self.assertIs(f["python"]["ok"], True)
         for name in ("version", "exe", "via"):
@@ -230,9 +237,9 @@ class Check(EngineTestCase):
         self.assertEqual(len(f["steps"]), 7)
         self.assertEqual(f["steps"][0], "Looking for Python")
         self.assertEqual(f["launch"], dict(
-            exe=str(p["env"] / "Scripts" / "pythonw.exe"),
-            args=f'"{p["prog"] / "dictate.py"}" --open',
-            workDir=str(p["prog"])))
+            exe=long_name(p["env"] / "Scripts" / "pythonw.exe"),
+            args=f'"{long_name(p["prog"] / "dictate.py")}" --open',
+            workDir=long_name(p["prog"])))
         self.assertLess(r.seconds, 60)
         self.assert_nothing_changed(p)
 
@@ -379,11 +386,11 @@ class Progress(EngineTestCase):
             self.assertEqual(r.markers[-1]["kind"], "done")
             self.assertEqual(r.of("error"), [])
             d = done[0]
-            self.assertEqual(d["installRoot"], str(p["prog"]))
-            self.assertEqual(d["envDir"], str(p["env"]))
-            self.assertEqual(d["dataDir"], str(p["data"]))
-            self.assertEqual(d["startMenuLnk"], str(p["sm"] / "Hold to talk.lnk"))
-            self.assertEqual(d["desktopLnk"], str(p["dt"] / "Hold to talk.lnk"))
+            self.assertEqual(d["installRoot"], long_name(p["prog"]))
+            self.assertEqual(d["envDir"], long_name(p["env"]))
+            self.assertEqual(d["dataDir"], long_name(p["data"]))
+            self.assertEqual(d["startMenuLnk"], long_name(p["sm"] / "Hold to talk.lnk"))
+            self.assertEqual(d["desktopLnk"], long_name(p["dt"] / "Hold to talk.lnk"))
             self.assertIs(d["termsRecorded"], True)
             self.assertEqual(d["launch"], facts["launch"])
             # the markers are in the order of the steps, the done one last

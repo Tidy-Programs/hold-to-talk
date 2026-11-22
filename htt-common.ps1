@@ -60,6 +60,28 @@ public static class HttShell {
     return [Environment]::GetFolderPath($FallbackSpecial)
 }
 
+# A path in its long form. Windows can also name a folder in the short 8.3
+# form (PROGRA~1 for Program Files; %TEMP% often has such a part). Mixing
+# the two forms breaks comparisons by name, and Python warns that the
+# environment "may have moved". Only the part of the path that
+# already exists can be expanded; the rest is kept as it is. Anything that
+# goes wrong leaves the path unchanged.
+function Get-HttLongPath([string]$Path) {
+    if (-not $Path -or $Path -notmatch '~' -or -not [IO.Path]::IsPathRooted($Path)) { return $Path }
+    try {
+        $head = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+        $tail = @()
+        while ($head -and -not (Test-Path -LiteralPath $head)) {
+            $tail = @(Split-Path -Leaf $head) + $tail
+            $head = Split-Path -Parent $head
+        }
+        if (-not $head) { return $Path }
+        $long = (Get-Item -LiteralPath $head -Force -ErrorAction Stop).FullName
+        foreach ($part in $tail) { $long = Join-Path $long $part }
+        return $long
+    } catch { return $Path }
+}
+
 function Get-HttLayout {
     param($InstallRoot, $EnvDir, $StartMenuDir, $DesktopDir, $RegKey, [switch]$Strict)
     $local = $env:LOCALAPPDATA
@@ -87,12 +109,17 @@ function Get-HttLayout {
         $DesktopDir = Get-KnownFolderPath 'B4BFCC3A-DB2C-424C-B029-7FE99A87C641' 'DesktopDirectory'
     }
     if (-not $RegKey) { $RegKey = $script:HttDefaultRegKey }
+    $InstallRoot  = Get-HttLongPath $InstallRoot
+    $EnvDir       = Get-HttLongPath $EnvDir
+    $StartMenuDir = Get-HttLongPath $StartMenuDir
+    $DesktopDir   = Get-HttLongPath $DesktopDir
 
     # The data folder is where the app itself puts it (settings.py):
     # HOLDTOTALK_HOME, else <environment's parent>\data.
     $appHome = Split-Path -Parent $EnvDir
     $data = Get-HttEnv 'HOLDTOTALK_HOME'
     if (-not $data) { $data = Join-Path $appHome 'data' }
+    $data = Get-HttLongPath $data
 
     [pscustomobject]@{
         InstallRoot  = $InstallRoot

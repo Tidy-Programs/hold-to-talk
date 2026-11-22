@@ -32,5 +32,12 @@ jobs:
       - name: Install the core requirements
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      # From cmd, not the default PowerShell 7, and with PSModulePath cleared:
+      # PowerShell 7's module path, handed down to the Windows PowerShell 5.1
+      # the tests start, stops 5.1 loading its own Get-Acl, Get-FileHash and
+      # Get-AuthenticodeSignature. Without the variable, 5.1 uses its defaults.
       - name: Run the unit tests
+        shell: cmd
+        env:
+          PSModulePath: ""
         run: python -B -m unittest discover tests

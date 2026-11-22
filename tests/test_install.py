@@ -544,23 +544,26 @@ class InstallEndToEnd(unittest.TestCase):
                              f"{name} must not be copied")
         self.assertTrue((self.env_dir / "Scripts" / "pythonw.exe").is_file())
 
+        # The installer writes folder names in their long form; %TEMP% (and
+        # so self.prog) can be in the short 8.3 form, as on GitHub's machines.
+        prog = Path(os.path.realpath(self.prog))
         for lnk in (self.sm / "Hold to talk.lnk", self.dt / "Hold to talk.lnk"):
             sc = read_shortcut(lnk)
             self.assertEqual(Path(sc["target"]).resolve(),
                              (self.env_dir / "Scripts" / "pythonw.exe").resolve())
-            self.assertEqual(sc["args"], f'"{self.prog / "dictate.py"}" --open')
+            self.assertEqual(sc["args"], f'"{prog / "dictate.py"}" --open')
             self.assertEqual(Path(sc["dir"]).resolve(), self.prog.resolve())
-            self.assertEqual(sc["icon"], f"{self.prog / 'app.ico'},0")
+            self.assertEqual(sc["icon"], f"{prog / 'app.ico'},0")
 
         values = self.reg()
         self.assertEqual(values["DisplayName"][0], "Hold to talk")
         import settings
         self.assertEqual(values["DisplayVersion"][0], settings.APP_VERSION)
         self.assertEqual(values["Publisher"][0], "Hold to talk contributors")
-        self.assertEqual(values["InstallLocation"][0], str(self.prog))
-        self.assertEqual(values["DisplayIcon"][0], str(self.prog / "app.ico"))
+        self.assertEqual(values["InstallLocation"][0], str(prog))
+        self.assertEqual(values["DisplayIcon"][0], str(prog / "app.ico"))
         self.assertEqual(values["UninstallString"][0],
-                         f'"{self.prog / "uninstall.bat"}"')
+                         f'"{prog / "uninstall.bat"}"')
         for name in ("NoModify", "NoRepair", "EstimatedSize"):
             self.assertEqual(values[name][1], winreg.REG_DWORD, name)
         self.assertEqual(values["NoModify"][0], 1)
