@@ -5,7 +5,7 @@ All notable changes to Hold to talk. The version is `APP_VERSION` in
 
 ## 0.9.1
 
-Release date: not yet released
+Release date: 20 November 2026
 
 **Fixed**
 - The log scrubber now removes a Windows account name that contains a space
