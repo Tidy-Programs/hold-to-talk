@@ -138,3 +138,16 @@ OpenAI). You can choose other models in the settings file (`model`,
   dictating" (`audiomute.py`) calls the Windows Core Audio API (WASAPI session
   controls) directly through Python's `ctypes`; it adds no library, so nothing
   is added to the lock files.
+
+## The Windows and Mac app in `desktop/` (in progress)
+
+The `desktop/` folder holds a new version of Hold to talk for Windows and
+macOS that is not released yet. Unlike the Python app above, it **does
+contain** another project's code: it is based on **Handy**
+(<https://github.com/cjpais/Handy>), copyright (c) 2025 CJ Pais, under the
+MIT licence. Handy's licence text is in `desktop/LICENSE` and is shipped
+inside that app as `resources/notices/Handy-LICENSE.txt`. The MIT licence
+covers Handy's code wherever it appears in `desktop/`; Hold to talk's own
+additions there come under the Hold to talk Licence. The libraries that app
+builds in are listed in `desktop/src-tauri/Cargo.lock` and `desktop/bun.lock`;
+a full list of their licences will be added here before it is released.
