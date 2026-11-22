@@ -3,6 +3,18 @@
 All notable changes to Hold to talk. The version is `APP_VERSION` in
 `settings.py`.
 
+## Not yet released
+
+**Fixed**
+- The installer no longer deletes the program files it has just copied when
+  the install folder is given by its short Windows name (the 8.3 form, such as
+  `PROGRA~1`). Its "remove files an older version left" step compared the
+  short name with the long one, so every new file looked old. The installer
+  now works with the long form of every folder throughout. Found because the
+  installer tests failed on GitHub's test machines, whose temporary folder has
+  a short name; the tests there also run with a clean PowerShell module path
+  now.
+
 ## 0.9.1
 
 Release date: 20 November 2026

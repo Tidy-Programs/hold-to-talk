@@ -622,10 +622,16 @@ function Install-Files($Files, [string]$From, [string]$To) {
     # Files an older version installed that are no longer part of the app.
     $known = @{}; foreach ($f in $Files) { $known[$f.ToLower()] = $true }
     $ext = '.py', '.bat', '.ps1', '.ico', '.md', '.txt', '.html', '.css', '.js'
-    Get-ChildItem -LiteralPath $To -Recurse -File -ErrorAction SilentlyContinue |
+    # The folder's real name: a path given in the short 8.3 form (PROGRA~1)
+    # comes back from Get-ChildItem in the long form (Program Files), and
+    # cutting one by the other's length made every new file look like an old one.
+    $root = (Get-Item -LiteralPath $To -Force).FullName.TrimEnd('\') + '\'
+    Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -notmatch '\\__pycache__\\' -and $ext -contains $_.Extension.ToLower() } |
         ForEach-Object {
-            $rel = $_.FullName.Substring($To.TrimEnd('\').Length + 1).ToLower()
+            # Never remove a file whose name does not start with the folder's own.
+            if (-not $_.FullName.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return }
+            $rel = $_.FullName.Substring($root.Length).ToLower()
             if (-not $known.ContainsKey($rel)) {
                 Say "  Removing an old file: $rel"
                 Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
