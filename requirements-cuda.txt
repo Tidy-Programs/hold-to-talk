@@ -9,5 +9,5 @@
 # Installing these means accepting NVIDIA's licence for them (see
 # THIRD-PARTY-NOTICES.md). Tested: nvidia-cublas-cu12 12.9.2.10,
 # nvidia-cudnn-cu12 9.28.1.4 (pulls in nvidia-cuda-nvrtc-cu12 12.9.86).
-nvidia-cublas-cu12>=12.4,<13
+nvidia-cublas-cu12>=12.9.3.13,<13
 nvidia-cudnn-cu12>=9,<10
