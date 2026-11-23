@@ -83,9 +83,13 @@ pub fn cancel_history_entry_transcription(jobs: State<'_, Arc<TranscriptionJobMa
 #[tauri::command]
 #[specta::specta]
 pub async fn transcribe_file(
+    app: tauri::AppHandle,
     jobs: State<'_, Arc<TranscriptionJobManager>>,
     path: String,
 ) -> Result<HistoryEntry, String> {
+    if !crate::terms::is_accepted(&app) {
+        return Err("The Terms of Use have not been accepted.".to_string());
+    }
     let jobs = Arc::clone(&jobs);
     tauri::async_runtime::spawn_blocking(move || jobs.transcribe_file(PathBuf::from(path)))
         .await

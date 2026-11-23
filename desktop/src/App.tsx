@@ -16,6 +16,7 @@ import "./App.css";
 import SecureInputWarning from "./components/SecureInputWarning";
 import Footer from "./components/footer";
 import { OnboardingFlow } from "./components/onboarding/OnboardingFlow";
+import { TermsScreen } from "./components/terms/TermsScreen";
 import ModelMigration from "./components/onboarding/ModelMigration";
 import {
   ReplaceModel,
@@ -37,8 +38,11 @@ import { deleteRetiredModel } from "@/lib/models/retired";
 import { NoticePanel } from "@/components/notices/NoticePanel";
 import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
 
-// flow is first-run onboarding; the rest are single screens for returning users.
+// terms comes first, for everyone who has not accepted the current Terms of
+// Use; flow is first-run onboarding; the rest are single screens for
+// returning users.
 type OnboardingStep =
+  | "terms"
   | "flow"
   | "permissions"
   | "migration"
@@ -176,6 +180,21 @@ function App() {
   };
 
   const checkOnboardingStatus = async () => {
+    // Nothing else, onboarding included, until the current Terms of Use are
+    // accepted. If the check itself fails, the terms are shown: Rust refuses
+    // to record without an acceptance anyway.
+    let termsAccepted = false;
+    try {
+      termsAccepted = (await commands.getTermsStatus()).accepted;
+    } catch (e) {
+      console.error("Failed to check the Terms of Use:", e);
+    }
+    if (!termsAccepted) {
+      await revealMainWindowForPermissions();
+      setOnboardingStep("terms");
+      return;
+    }
+
     try {
       const settingsResult = await commands.getAppSettings();
       const hasCompletedOnboarding =
@@ -291,6 +310,10 @@ function App() {
           {t("settings.debug.onboardingPreview.exitButton")}
         </button>
       </>
+    );
+  } else if (onboardingStep === "terms") {
+    content = (
+      <TermsScreen mode="gate" onAccepted={() => checkOnboardingStatus()} />
     );
   } else if (onboardingStep === "flow") {
     content = <OnboardingFlow onComplete={() => setOnboardingStep("done")} />;

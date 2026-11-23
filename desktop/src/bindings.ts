@@ -699,6 +699,36 @@ async completeOnboarding() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * The terms, for the Terms of Use screen.
+ */
+async getTerms() : Promise<TermsText> {
+    return await TAURI_INVOKE("get_terms");
+},
+/**
+ * Whether the current terms are accepted, and the stored record.
+ */
+async getTermsStatus() : Promise<TermsStatus> {
+    return await TAURI_INVOKE("get_terms_status");
+},
+/**
+ * "I agree": record the acceptance of `version`, which must be the version
+ * the screen showed. Dictation can start as soon as this returns.
+ */
+async acceptTerms(version: string) : Promise<Result<TermsRecord, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("accept_terms", { version }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * "Quit" on the Terms of Use screen.
+ */
+async quitApp() : Promise<void> {
+    await TAURI_INVOKE("quit_app");
+},
 async getAvailableModels() : Promise<Result<ModelInfo[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_available_models") };
@@ -1518,6 +1548,30 @@ export type StreamTextEvent = { committed: string; tentative: string }
  * Semantic kind of "working" phase, used to localize the spinner label.
  */
 export type StreamWorkKind = "transcribing" | "polishing"
+/**
+ * The record of an acceptance, as stored in `terms-accepted.json`.
+ */
+export type TermsRecord = { version: string; accepted_at: string; how: string }
+/**
+ * Whether the current terms are accepted, and the record if there is one.
+ */
+export type TermsStatus = { accepted: boolean; record: TermsRecord | null }
+/**
+ * The terms as the window shows them.
+ */
+export type TermsText = {
+/**
+ * The version this build asks for, sent back by "I agree".
+ */
+version: string;
+/**
+ * The first line of TERMS.md, e.g. "Version 1.0 — 18 November 2026".
+ */
+version_line: string;
+/**
+ * The whole of TERMS.md.
+ */
+text: string }
 /**
  * UI appearance mode. `System` follows the OS `prefers-color-scheme`; `Light`
  * and `Dark` force one of the two palettes Handy already ships.

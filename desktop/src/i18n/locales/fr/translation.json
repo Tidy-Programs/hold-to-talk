@@ -885,6 +885,12 @@
         "description": "Voir le code source et contribuer",
         "button": "Voir sur GitHub"
       },
+      "terms": {
+        "title": "Terms of Use",
+        "accepted": "You accepted version {{version}} on {{date}}.",
+        "notAccepted": "Not accepted yet.",
+        "button": "Read"
+      },
       "supportDevelopment": {
         "title": "Soutenir le développement",
         "description": "Aidez-nous à continuer à construire Handy",
@@ -994,5 +1000,18 @@
     "learnMore": "Comment résoudre ce problème",
     "recorderBlocked": "Impossible d'enregistrer un raccourci pour le moment : Secure Input de macOS bloque les événements clavier. Résolvez d'abord l'avertissement Secure Input.",
     "dismiss": "Ignorer"
+  },
+  "terms": {
+    "title": "Terms of Use",
+    "regionLabel": "The Terms of Use",
+    "loading": "Loading the terms…",
+    "agreeNote": "By agreeing you accept the whole terms. This includes the sections on no warranty, limits of liability, assumption of risk, indemnity and disputes (sections 9 to 14).",
+    "gateHint": "Hold to talk will not dictate until you agree. Read the terms, then choose I agree to the Terms of Use, or Quit.",
+    "loadFailed": "The terms could not be shown, so they cannot be accepted. You can quit and install the app again.",
+    "quit": "Quit",
+    "quitting": "Closing Hold to talk…",
+    "agree": "I agree to the Terms of Use",
+    "saving": "Saving…",
+    "close": "Close"
   }
 }

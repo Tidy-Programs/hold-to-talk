@@ -70,6 +70,16 @@ class TermsText(unittest.TestCase):
         self.assertEqual(m.group(1), settings.TERMS_VERSION)
         self.assertEqual(terms.version_line(TEXT), m.groups())
 
+    def test_the_desktop_app_asks_for_the_same_version(self):
+        # desktop/ (the Windows and Mac app) builds this TERMS.md in and keeps
+        # the same terms-accepted.json record, so both apps must agree.
+        source = (ROOT / "desktop" / "src-tauri" / "src" / "terms.rs").read_text(
+            encoding="utf-8")
+        m = re.search(r'pub const TERMS_VERSION: &str = "([^"]+)";', source)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), settings.TERMS_VERSION)
+        self.assertIn('include_str!("../../../TERMS.md")', source)
+
     def test_every_numbered_section_is_there_in_order(self):
         found = re.findall(r"^## (\d+)\. (.+)$", TEXT, re.M)
         self.assertEqual([(int(n), t) for n, t in found],

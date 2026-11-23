@@ -10,10 +10,23 @@ import { AppLanguageSelector } from "../AppLanguageSelector";
 import { ShowWhatsNewOnUpdate } from "../ShowWhatsNewOnUpdate";
 import { ThemeSelector } from "../ThemeSelector";
 import { LogDirectory } from "../debug";
+import { TermsScreen } from "../../terms/TermsScreen";
+import { commands, type TermsRecord } from "@/bindings";
 
 export const AboutSettings: React.FC = () => {
   const { t } = useTranslation();
   const [version, setVersion] = useState("");
+  const [showTerms, setShowTerms] = useState(false);
+  const [termsRecord, setTermsRecord] = useState<TermsRecord | null>(null);
+
+  useEffect(() => {
+    commands
+      .getTermsStatus()
+      .then((status) => setTermsRecord(status.accepted ? status.record : null))
+      .catch((error) =>
+        console.error("Failed to read the Terms of Use record:", error),
+      );
+  }, []);
 
   useEffect(() => {
     const fetchVersion = async () => {
@@ -76,6 +89,30 @@ export const AboutSettings: React.FC = () => {
             {t("settings.about.sourceCode.button")}
           </Button>
         </SettingContainer>
+
+        <SettingContainer
+          title={t("settings.about.terms.title")}
+          description={
+            termsRecord
+              ? t("settings.about.terms.accepted", {
+                  version: termsRecord.version,
+                  date: termsRecord.accepted_at.slice(0, 10),
+                })
+              : t("settings.about.terms.notAccepted")
+          }
+          grouped={true}
+        >
+          <Button
+            variant="secondary"
+            size="md"
+            onClick={() => setShowTerms(true)}
+          >
+            {t("settings.about.terms.button")}
+          </Button>
+        </SettingContainer>
+        {showTerms && (
+          <TermsScreen mode="view" onClose={() => setShowTerms(false)} />
+        )}
 
         <AppDataDirectory descriptionMode="tooltip" grouped={true} />
         <LogDirectory grouped={true} />

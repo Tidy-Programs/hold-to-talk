@@ -885,6 +885,12 @@
         "description": "Bekijk de broncode en draag bij",
         "button": "Bekijk op GitHub"
       },
+      "terms": {
+        "title": "Terms of Use",
+        "accepted": "You accepted version {{version}} on {{date}}.",
+        "notAccepted": "Not accepted yet.",
+        "button": "Read"
+      },
       "supportDevelopment": {
         "title": "Ontwikkeling ondersteunen",
         "description": "Help ons om te blijven bouwen aan Handy",
@@ -994,5 +1000,18 @@
     "learnMore": "Hoe je dit oplost",
     "recorderBlocked": "Sneltoetsen kunnen nu niet worden opgenomen — Secure Input van macOS blokkeert toetsgebeurtenissen. Los eerst de Secure Input-waarschuwing op.",
     "dismiss": "Sluiten"
+  },
+  "terms": {
+    "title": "Terms of Use",
+    "regionLabel": "The Terms of Use",
+    "loading": "Loading the terms…",
+    "agreeNote": "By agreeing you accept the whole terms. This includes the sections on no warranty, limits of liability, assumption of risk, indemnity and disputes (sections 9 to 14).",
+    "gateHint": "Hold to talk will not dictate until you agree. Read the terms, then choose I agree to the Terms of Use, or Quit.",
+    "loadFailed": "The terms could not be shown, so they cannot be accepted. You can quit and install the app again.",
+    "quit": "Quit",
+    "quitting": "Closing Hold to talk…",
+    "agree": "I agree to the Terms of Use",
+    "saving": "Saving…",
+    "close": "Close"
   }
 }

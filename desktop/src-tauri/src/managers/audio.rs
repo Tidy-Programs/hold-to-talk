@@ -557,8 +557,9 @@ impl AudioRecordingManager {
             last_input_silent: Arc::new(AtomicBool::new(false)),
         };
 
-        // Always-on?  Open immediately.
-        if matches!(mode, MicrophoneMode::AlwaysOn) {
+        // Always-on?  Open immediately, but not before the Terms of Use are
+        // accepted: then the first recording opens it (try_start_recording).
+        if matches!(mode, MicrophoneMode::AlwaysOn) && crate::terms::is_accepted(app) {
             manager.start_microphone_stream()?;
         }
 

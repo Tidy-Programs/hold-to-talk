@@ -184,6 +184,12 @@ pub fn initialize_shortcuts(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // No shortcut works until a person has accepted the Terms of Use.
+    if !crate::terms::is_accepted(&app) {
+        log::warn!("Shortcuts not initialized: the Terms of Use are not accepted");
+        return Err("The Terms of Use have not been accepted.".to_string());
+    }
+
     // Initialize shortcuts
     crate::shortcut::init_shortcuts(&app);
 

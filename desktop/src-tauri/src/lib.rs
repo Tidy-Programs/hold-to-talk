@@ -28,6 +28,7 @@ mod settings;
 mod shortcut;
 mod signal_handle;
 mod system_languages;
+mod terms;
 mod transcription_coordinator;
 mod transcription_hook;
 mod tray;
@@ -536,6 +537,15 @@ fn run_headless_transcription(app: &AppHandle, args: &CliArgs) -> i32 {
         return 0;
     };
 
+    if !crate::terms::is_accepted(app) {
+        eprintln!(
+            "error: Hold to talk will not transcribe until you have accepted its Terms of Use \
+             (version {}). Open the app and choose I agree.",
+            crate::terms::TERMS_VERSION
+        );
+        return 2;
+    }
+
     // read_wav_samples reads 16-bit int samples and does no validation; the app
     // only ever saves 16 kHz mono 16-bit PCM, so reject anything else rather than
     // transcribe garbage / mis-time / mis-decode.
@@ -773,6 +783,10 @@ pub fn run(cli_args: CliArgs) {
             commands::initialize_shortcuts,
             commands::reset_macos_permission,
             commands::complete_onboarding,
+            terms::get_terms,
+            terms::get_terms_status,
+            terms::accept_terms,
+            terms::quit_app,
             commands::models::get_available_models,
             commands::models::get_model_info,
             commands::models::download_model,

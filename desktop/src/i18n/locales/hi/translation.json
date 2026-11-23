@@ -885,6 +885,12 @@
         "description": "सोर्स कोड देखें और योगदान दें",
         "button": "GitHub पर देखें"
       },
+      "terms": {
+        "title": "Terms of Use",
+        "accepted": "You accepted version {{version}} on {{date}}.",
+        "notAccepted": "Not accepted yet.",
+        "button": "Read"
+      },
       "supportDevelopment": {
         "title": "डेवलपमेंट में सहयोग करें",
         "description": "Handy को आगे बढ़ाने में हमारी मदद करें",
@@ -994,5 +1000,18 @@
     "learnMore": "इसे कैसे ठीक करें",
     "recorderBlocked": "अभी शॉर्टकट रिकॉर्ड नहीं किए जा सकते — macOS Secure Input कुंजी इवेंट ब्लॉक कर रहा है. पहले Secure Input चेतावनी हल करें.",
     "dismiss": "खारिज करें"
+  },
+  "terms": {
+    "title": "Terms of Use",
+    "regionLabel": "The Terms of Use",
+    "loading": "Loading the terms…",
+    "agreeNote": "By agreeing you accept the whole terms. This includes the sections on no warranty, limits of liability, assumption of risk, indemnity and disputes (sections 9 to 14).",
+    "gateHint": "Hold to talk will not dictate until you agree. Read the terms, then choose I agree to the Terms of Use, or Quit.",
+    "loadFailed": "The terms could not be shown, so they cannot be accepted. You can quit and install the app again.",
+    "quit": "Quit",
+    "quitting": "Closing Hold to talk…",
+    "agree": "I agree to the Terms of Use",
+    "saving": "Saving…",
+    "close": "Close"
   }
 }

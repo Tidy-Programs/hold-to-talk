@@ -518,6 +518,13 @@ impl ShortcutAction for TranscribeAction {
         let start_time = Instant::now();
         debug!("TranscribeAction::start called for binding: {}", binding_id);
 
+        // Every way to start a recording (hotkey, CLI flag, Unix signal) comes
+        // through here: nothing records until the Terms of Use are accepted.
+        if !crate::terms::is_accepted(app) {
+            warn!("Not starting recording: the Terms of Use are not accepted");
+            return;
+        }
+
         // Load model in the background
         let tm = app.state::<Arc<TranscriptionManager>>();
         let rm = app.state::<Arc<AudioRecordingManager>>();

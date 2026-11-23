@@ -885,6 +885,12 @@
         "description": "檢視原始碼並參與貢獻",
         "button": "在 GitHub 上檢視"
       },
+      "terms": {
+        "title": "Terms of Use",
+        "accepted": "You accepted version {{version}} on {{date}}.",
+        "notAccepted": "Not accepted yet.",
+        "button": "Read"
+      },
       "supportDevelopment": {
         "title": "支持開發",
         "description": "幫助我們繼續開發 Handy",
@@ -994,5 +1000,18 @@
     "learnMore": "如何解決",
     "recorderBlocked": "目前無法錄製快捷鍵——macOS 的 Secure Input 正在阻擋按鍵事件。請先解決 Secure Input 警告。",
     "dismiss": "關閉"
+  },
+  "terms": {
+    "title": "Terms of Use",
+    "regionLabel": "The Terms of Use",
+    "loading": "Loading the terms…",
+    "agreeNote": "By agreeing you accept the whole terms. This includes the sections on no warranty, limits of liability, assumption of risk, indemnity and disputes (sections 9 to 14).",
+    "gateHint": "Hold to talk will not dictate until you agree. Read the terms, then choose I agree to the Terms of Use, or Quit.",
+    "loadFailed": "The terms could not be shown, so they cannot be accepted. You can quit and install the app again.",
+    "quit": "Quit",
+    "quitting": "Closing Hold to talk…",
+    "agree": "I agree to the Terms of Use",
+    "saving": "Saving…",
+    "close": "Close"
   }
 }
