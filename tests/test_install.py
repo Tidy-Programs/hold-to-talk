@@ -1011,7 +1011,10 @@ $d = Split-Path -Parent $MyInvocation.MyCommand.Path
 $acl = Get-Acl -LiteralPath $d
 $ids = @($acl.Access | ForEach-Object {
     $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
-$info = @{ dir = $d; protected = $acl.AreAccessRulesProtected; ids = $ids;
+$owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+# (shown when the test fails: whether each entry is inherited, and its rights)
+$rules = @($acl.Access | ForEach-Object { "$($_.IsInherited) $($_.FileSystemRights)" })
+$info = @{ dir = $d; protected = $acl.AreAccessRulesProtected; ids = $ids; owner = $owner; rules = $rules;
            files = @(Get-ChildItem -LiteralPath $d -Name | ForEach-Object { [string]$_ }) }
 ConvertTo-Json $info -Compress | Set-Content -Encoding ASCII $env:HTT_STUB_OUT
 exit 2
@@ -1058,9 +1061,19 @@ class UninstallTempFolder(unittest.TestCase):
         folder = Path(info["dir"])
         self.assertEqual(folder.parent.resolve(), self.temp.resolve())
         self.assertTrue(folder.name.startswith("htt-uninstall-"), folder)
-        # inherited access removed, this account the only one let in
+        # Inherited access removed, and no other ordinary account let in.
+        # Normally this account is the only entry. When the tests run as an
+        # elevated administrator (as on GitHub's machines), entries for
+        # SYSTEM, Administrators and OWNER RIGHTS (the folder's owner) can
+        # remain; SYSTEM and Administrators can take ownership of any folder
+        # anyway. The owner must be this account or Administrators.
+        me = self.my_sid()
+        system, admins, owner_rights = "S-1-5-18", "S-1-5-32-544", "S-1-3-4"
         self.assertTrue(info["protected"], info)
-        self.assertEqual(set(info["ids"]), {self.my_sid()}, info)
+        self.assertIn(me, info["ids"], info)
+        self.assertLessEqual(set(info["ids"]),
+                             {me, system, admins, owner_rights}, info)
+        self.assertIn(info["owner"], {me, admins}, info)
         # both scripts were copied there, and the folder is gone afterwards
         self.assertEqual(sorted(info["files"]),
                          ["htt-common.ps1", "uninstall.ps1"])
