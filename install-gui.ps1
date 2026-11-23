@@ -3703,7 +3703,13 @@ function Invoke-SelfTest {
         $script:PyLastError = $null; $script:Ran.Clear()
         Start-PythonInstall
         $dir = $script:Py.Dir
-        for ($k = 0; $k -lt 3; $k++) { Step-PythonRun }
+        # Step until the first data has arrived (a step reads at most 8 x 64 KB,
+        # far less than the 3 MB file). A fixed number of steps is not enough:
+        # on a slower or busier machine a read may not have finished yet.
+        for ($k = 0; $k -lt 500 -and $script:Py -and $script:Py.Got -eq 0; $k++) {
+            Step-PythonRun
+            if ($script:Py -and $script:Py.Got -eq 0) { Start-Sleep -Milliseconds 10 }
+        }
         $partial = Join-Path $dir ('python-' + $pinBig.Version + '-amd64.exe')
         Check ($script:Py.Phase -eq 'download' -and (Test-Path -LiteralPath $partial) -and $script:Py.Got -gt 0 -and $script:Py.Got -lt $pinBig.Bytes) 'python cancel: the test did not get a partial file'
         Check (Pressable $ui.PyCancelBtn) 'python cancel: no Cancel button while downloading'
