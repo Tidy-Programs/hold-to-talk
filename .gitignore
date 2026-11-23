@@ -63,3 +63,9 @@ htt-test-home-*/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# The Windows and Mac app (desktop/, based on Handy) ships its own sounds and
+# test fixtures; the recording rules above are for dictation data, not these.
+!desktop/src-tauri/resources/*.wav
+!desktop/src-tauri/tests/fixtures/*.opus
+!desktop/.vscode/
