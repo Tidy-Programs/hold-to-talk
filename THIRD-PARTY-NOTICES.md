@@ -33,7 +33,7 @@ the installed package itself declares.
 | tokenizers | 0.23.3 | Apache-2.0 (package classifier; the project's `LICENSE` is Apache License 2.0) | Text tokenizer for Whisper |
 | huggingface-hub | 2.4.0 | Apache-2.0 | Downloads the speech model |
 | av (PyAV) | 19.0.2 | BSD-3-Clause (the Python bindings; see the bundled FFmpeg libraries below) | Audio decoding |
-| numpy | 2.5.4 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Audio arrays |
+| numpy | 2.5.5 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | Audio arrays |
 | sounddevice | 0.5.6 | MIT (bundles PortAudio, see below) | Microphone access |
 | pystray | 0.19.5 | LGPL-3.0 (classifier "LGPLv3") | Tray icon. Installed as a separate, unmodified library from PyPI, so you can replace it with another version |
 | pillow | 13.0.0 | MIT-CMU | Drawing the icons |

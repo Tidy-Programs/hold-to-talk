@@ -544,23 +544,26 @@ class InstallEndToEnd(unittest.TestCase):
                              f"{name} must not be copied")
         self.assertTrue((self.env_dir / "Scripts" / "pythonw.exe").is_file())
 
+        # The installer writes folder names in their long form; %TEMP% (and
+        # so self.prog) can be in the short 8.3 form, as on GitHub's machines.
+        prog = Path(os.path.realpath(self.prog))
         for lnk in (self.sm / "Hold to talk.lnk", self.dt / "Hold to talk.lnk"):
             sc = read_shortcut(lnk)
             self.assertEqual(Path(sc["target"]).resolve(),
                              (self.env_dir / "Scripts" / "pythonw.exe").resolve())
-            self.assertEqual(sc["args"], f'"{self.prog / "dictate.py"}" --open')
+            self.assertEqual(sc["args"], f'"{prog / "dictate.py"}" --open')
             self.assertEqual(Path(sc["dir"]).resolve(), self.prog.resolve())
-            self.assertEqual(sc["icon"], f"{self.prog / 'app.ico'},0")
+            self.assertEqual(sc["icon"], f"{prog / 'app.ico'},0")
 
         values = self.reg()
         self.assertEqual(values["DisplayName"][0], "Hold to talk")
         import settings
         self.assertEqual(values["DisplayVersion"][0], settings.APP_VERSION)
         self.assertEqual(values["Publisher"][0], "Hold to talk contributors")
-        self.assertEqual(values["InstallLocation"][0], str(self.prog))
-        self.assertEqual(values["DisplayIcon"][0], str(self.prog / "app.ico"))
+        self.assertEqual(values["InstallLocation"][0], str(prog))
+        self.assertEqual(values["DisplayIcon"][0], str(prog / "app.ico"))
         self.assertEqual(values["UninstallString"][0],
-                         f'"{self.prog / "uninstall.bat"}"')
+                         f'"{prog / "uninstall.bat"}"')
         for name in ("NoModify", "NoRepair", "EstimatedSize"):
             self.assertEqual(values[name][1], winreg.REG_DWORD, name)
         self.assertEqual(values["NoModify"][0], 1)
@@ -1008,7 +1011,10 @@ $d = Split-Path -Parent $MyInvocation.MyCommand.Path
 $acl = Get-Acl -LiteralPath $d
 $ids = @($acl.Access | ForEach-Object {
     $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value })
-$info = @{ dir = $d; protected = $acl.AreAccessRulesProtected; ids = $ids;
+$owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+# (shown when the test fails: whether each entry is inherited, and its rights)
+$rules = @($acl.Access | ForEach-Object { "$($_.IsInherited) $($_.FileSystemRights)" })
+$info = @{ dir = $d; protected = $acl.AreAccessRulesProtected; ids = $ids; owner = $owner; rules = $rules;
            files = @(Get-ChildItem -LiteralPath $d -Name | ForEach-Object { [string]$_ }) }
 ConvertTo-Json $info -Compress | Set-Content -Encoding ASCII $env:HTT_STUB_OUT
 exit 2
@@ -1055,9 +1061,19 @@ class UninstallTempFolder(unittest.TestCase):
         folder = Path(info["dir"])
         self.assertEqual(folder.parent.resolve(), self.temp.resolve())
         self.assertTrue(folder.name.startswith("htt-uninstall-"), folder)
-        # inherited access removed, this account the only one let in
+        # Inherited access removed, and no other ordinary account let in.
+        # Normally this account is the only entry. When the tests run as an
+        # elevated administrator (as on GitHub's machines), entries for
+        # SYSTEM, Administrators and OWNER RIGHTS (the folder's owner) can
+        # remain; SYSTEM and Administrators can take ownership of any folder
+        # anyway. The owner must be this account or Administrators.
+        me = self.my_sid()
+        system, admins, owner_rights = "S-1-5-18", "S-1-5-32-544", "S-1-3-4"
         self.assertTrue(info["protected"], info)
-        self.assertEqual(set(info["ids"]), {self.my_sid()}, info)
+        self.assertIn(me, info["ids"], info)
+        self.assertLessEqual(set(info["ids"]),
+                             {me, system, admins, owner_rights}, info)
+        self.assertIn(info["owner"], {me, admins}, info)
         # both scripts were copied there, and the folder is gone afterwards
         self.assertEqual(sorted(info["files"]),
                          ["htt-common.ps1", "uninstall.ps1"])

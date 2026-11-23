@@ -367,7 +367,9 @@ class EngineSwitches(unittest.TestCase):
         self.assertTrue(f["dataExists"])
         self.assertFalse(f["installed"])
         self.assertEqual(len(f["steps"]), 6)
-        self.assertEqual(Path(f["layout"]["installRoot"]), self.tmp / "prog")
+        # (the installer reports the long form; %TEMP% can be short 8.3 names)
+        self.assertEqual(Path(f["layout"]["installRoot"]),
+                         Path(os.path.realpath(self.tmp / "prog")))
         after = sorted(p.relative_to(self.tmp).as_posix() for p in self.tmp.rglob("*"))
         self.assertEqual(before, after)
 
